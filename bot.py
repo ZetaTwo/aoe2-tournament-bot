@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 
+import asyncio
 import dataclasses
 import io
 import logging
-import re
 import os
+import re
 import sys
-from pathlib import Path
 from typing import Optional, List, Any
 
 import coloredlogs
 import discord
+from flask import Flask
 from google.auth.transport.requests import Request
 from google.cloud import storage
 from google.oauth2.credentials import Credentials
 from googleapiclient import discovery
+from werkzeug import run_simple
 
 logger = logging.getLogger("AoE2TournamentBot")
 coloredlogs.install(level="INFO")
@@ -22,7 +24,7 @@ coloredlogs.install(level="INFO")
 ADMIN_USER_ID = int(os.environ["ADMIN_USER_ID"])
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 GCS_BUCKET = os.environ["GCS_BUCKET"]
-GOOGLE_API_TOKEN_PATH = os.environ.get('GOOGLE_API_TOKEN_PATH', "token.json")
+GOOGLE_API_TOKEN_PATH = os.environ.get("GOOGLE_API_TOKEN_PATH", "token.json")
 
 SHEET_NAME = "AoE2 Results"
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
@@ -70,7 +72,9 @@ class ResultsEntry:
 
 def get_google_credentials() -> Optional[Credentials]:
     try:
-        creds = Credentials.from_authorized_user_file(str(GOOGLE_API_TOKEN_PATH), GOOGLE_SCOPES)
+        creds = Credentials.from_authorized_user_file(
+            str(GOOGLE_API_TOKEN_PATH), GOOGLE_SCOPES
+        )
     except:
         logger.error(
             "No token.json found. Please set up Google API credentials manually first"
@@ -278,27 +282,47 @@ class AoE2TournamentBot(discord.Client):
             )
 
 
-def main() -> int:
+app = Flask(__name__)
+
+
+@app.route("/")
+def app_status():
+    return {"status": "ok"}
+
+
+async def serve_flask(app: Flask):
+    app.run("0.0.0.0", port=8080, debug=False)
+
+
+async def main() -> int:
     logger.info('Replays will be saved to bucket "%s"', GCS_BUCKET)
-    logger.info('Errors will be sent to user %d', ADMIN_USER_ID)
+    logger.info("Errors will be sent to user %d", ADMIN_USER_ID)
 
     google_credentials = get_google_credentials()
     if not google_credentials:
         return 1
-    
-    logger.info('Google API credentials valid')
+
+    logger.info("Google API credentials valid")
 
     results_sheet_id = get_replay_sheet_id(google_credentials)
     if not results_sheet_id:
         return 1
-    
-    logger.info('Results sheet set up')
 
+    logger.info("Results sheet set up")
 
     client = AoE2TournamentBot(google_credentials, results_sheet_id)
-    client.run(DISCORD_TOKEN, log_handler=None)
+    bot_task = client.start(DISCORD_TOKEN)
+    server_task = serve_flask(app)
+
+    try:
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(bot_task, name="Bot task")
+            tg.create_task(server_task, name="HTTP task")
+    except asyncio.CancelledError:
+        logger.info("Shutting down...")
+
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(asyncio.run(main()))
