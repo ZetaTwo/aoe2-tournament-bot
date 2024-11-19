@@ -22,6 +22,7 @@ coloredlogs.install(level="INFO")
 ADMIN_USER_ID = int(os.environ["ADMIN_USER_ID"])
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 GCS_BUCKET = os.environ["GCS_BUCKET"]
+GOOGLE_API_TOKEN_PATH = os.environ.get('GOOGLE_API_TOKEN_PATH', "token.json")
 
 SHEET_NAME = "AoE2 Results"
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
@@ -68,9 +69,8 @@ class ResultsEntry:
 
 
 def get_google_credentials() -> Optional[Credentials]:
-    token_path = Path("token.json")
     try:
-        creds = Credentials.from_authorized_user_file(str(token_path), GOOGLE_SCOPES)
+        creds = Credentials.from_authorized_user_file(str(GOOGLE_API_TOKEN_PATH), GOOGLE_SCOPES)
     except:
         logger.error(
             "No token.json found. Please set up Google API credentials manually first"
