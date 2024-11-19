@@ -14,6 +14,8 @@ def test_message1():
     assert entry.player2_id == 810249574173245501, entry.player2_id
     assert entry.civ_draft == "https://aoe2cm.net/draft/SfNXP", entry.civ_draft
     assert entry.map_draft == "https://aoe2cm.net/draft/zQKpk", entry.map_draft
+    assert entry.player1_score == None, entry.player1_score
+    assert entry.player2_score == None, entry.player2_score
 
 
 TEST_MESSAGE2 = """

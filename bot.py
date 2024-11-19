@@ -118,8 +118,22 @@ def parse_message_content(entry: ResultsEntry, content: str) -> ResultsEntry:
         else:
             entry.player1_id = int(players_match[0])
             entry.player2_id = int(players_match[1])
-    
-    content = discord_tag.sub('', content)
+
+    content = discord_tag.sub("", content)
+
+    # Try to match "maps: http://" or "map draft: http://..." with
+    # optional whitespace everywhere and case ignored
+    mapdraft = re.compile(r"maps?(?:\s+draft)?\s*:?\s*([^\s]+)", re.IGNORECASE)
+    if mapdraft_match := mapdraft.search(content):
+        entry.map_draft = mapdraft_match[1]
+    content = mapdraft.sub("", content)
+
+    # Try to match "civs: http://..." or "civ draft: http://..." with
+    # optional whitespace everywhere and case ignored
+    civdraft = re.compile(r"civs?(?:\s+draft)?\s*:?\s*([^\s]+)", re.IGNORECASE)
+    if civdraft_match := civdraft.search(content):
+        entry.civ_draft = civdraft_match[1]
+    content = civdraft.sub("", content)
 
     # Try to match any two groups of digits separated by anything on the same line
     if score_match := re.search(
@@ -127,20 +141,6 @@ def parse_message_content(entry: ResultsEntry, content: str) -> ResultsEntry:
     ):
         entry.player1_score = int(score_match[1])
         entry.player2_score = int(score_match[2])
-
-    # Try to match "maps: http://" or "map draft: http://..." with
-    # optional whitespace everywhere and case ignored
-    if mapdraft_match := re.search(
-        r"maps?(?:\s+draft)?\s*:?\s*([^\s]+)", content, re.IGNORECASE
-    ):
-        entry.map_draft = mapdraft_match[1]
-
-    # Try to match "civs: http://..." or "civ draft: http://..." with
-    # optional whitespace everywhere and case ignored
-    if civdraft_match := re.search(
-        r"civs?(?:\s+draft)?\s*:?\s*([^\s]+)", content, re.IGNORECASE
-    ):
-        entry.civ_draft = civdraft_match[1]
 
     return entry
 
@@ -172,10 +172,12 @@ class AoE2TournamentBot(discord.Client):
             category := message.channel.category
         ):
             entry.bracket = category.name
-        entry = self.parse_message_content(entry, message.content)
+        entry = parse_message_content(entry, message.content)
 
-        entry.player1_name = (await self.fetch_user(entry.player1_id)).display_name
-        entry.player2_name = (await self.fetch_user(entry.player2_id)).display_name
+        if entry.player1_id is not None:
+            entry.player1_name = (await self.fetch_user(entry.player1_id)).display_name
+        if entry.player2_id is not None:
+            entry.player2_name = (await self.fetch_user(entry.player2_id)).display_name
         download_links = []
         for idx, attachment in enumerate(message.attachments):
             attachment_io = io.BytesIO()
@@ -194,7 +196,7 @@ class AoE2TournamentBot(discord.Client):
         entry.replays_link = "\n".join(download_links)
         return entry
 
-    async def on_message(self, message: discord.Message) -> None:
+    async def process_message(self, message: discord.Message) -> None:
         if message.author == self.user:
             return
 
@@ -217,6 +219,16 @@ class AoE2TournamentBot(discord.Client):
             await self.report_admin_error(
                 "Failed to append results row. Please check logs"
             )
+
+    async def on_message(self, message: discord.Message) -> None:
+        logger.info("Processing new results message with ID %d", message.id)
+        return await self.process_message(message)
+
+    async def on_message_edit(
+        self, before: discord.Message, after: discord.Message
+    ) -> None:
+        logger.info("Processing updated results message with ID %d", after.id)
+        return await self.process_message(after)
 
 
 def main() -> int:
