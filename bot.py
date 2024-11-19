@@ -97,7 +97,7 @@ def validate_sheet_id(creds: Credentials, sheet_id: str) -> str:
     sheets = discovery.build("sheets", "v4", credentials=creds)
     sheet = sheets.spreadsheets().get(spreadsheetId=sheet_id).execute()
     logger.info('Writing to sheet titled "%s"', sheet["properties"]["title"])
-    return sheet['spreadsheetId']
+    return sheet["spreadsheetId"]
 
 
 def upload_gcs_file(filename: str, contents: bytes) -> None:
@@ -105,6 +105,44 @@ def upload_gcs_file(filename: str, contents: bytes) -> None:
     bucket = storage_client.bucket(GCS_BUCKET)
     blob = bucket.blob(filename)
     blob.upload_from_string(contents)
+
+
+def parse_message_content(entry: ResultsEntry, content: str) -> ResultsEntry:
+    # Find @User tags, hopefully from the "@User vs @User" part of the message
+    discord_tag = re.compile(r"<@(\d+)>")
+    if players_match := discord_tag.findall(content):
+        if len(players_match) != 2:
+            logger.info(
+                "Found %d players in the message, expected 2", len(players_match)
+            )
+        else:
+            entry.player1_id = int(players_match[0])
+            entry.player2_id = int(players_match[1])
+    
+    content = discord_tag.sub('', content)
+
+    # Try to match any two groups of digits separated by anything on the same line
+    if score_match := re.search(
+        r"^[^\d]*(\d{1,4})[^\d\v]+(\d{1,4})[^\d]*$", content, re.MULTILINE
+    ):
+        entry.player1_score = int(score_match[1])
+        entry.player2_score = int(score_match[2])
+
+    # Try to match "maps: http://" or "map draft: http://..." with
+    # optional whitespace everywhere and case ignored
+    if mapdraft_match := re.search(
+        r"maps?(?:\s+draft)?\s*:?\s*([^\s]+)", content, re.IGNORECASE
+    ):
+        entry.map_draft = mapdraft_match[1]
+
+    # Try to match "civs: http://..." or "civ draft: http://..." with
+    # optional whitespace everywhere and case ignored
+    if civdraft_match := re.search(
+        r"civs?(?:\s+draft)?\s*:?\s*([^\s]+)", content, re.IGNORECASE
+    ):
+        entry.civ_draft = civdraft_match[1]
+
+    return entry
 
 
 class AoE2TournamentBot(discord.Client):
@@ -130,46 +168,14 @@ class AoE2TournamentBot(discord.Client):
             poster=message.author.display_name,
             message_contents=message.content,
         )
-
         if isinstance(message.channel, discord.TextChannel) and (
             category := message.channel.category
         ):
             entry.bracket = category.name
+        entry = self.parse_message_content(entry, message.content)
 
-        # Find @User tags, hopefully from the "@User vs @User" part of the message
-        if players_match := re.findall(r'<@(\d+)>', message.content):
-            if len(players_match) != 2:
-                logger.info('Found %d players in the message, expected 2', len(players_match))
-            else:
-                entry.player1_id = int(players_match[0])
-                entry.player1_name = (await self.fetch_user(entry.player1_id)).display_name
-                entry.player2_id = int(players_match[1])
-                entry.player2_name = (await self.fetch_user(entry.player2_id)).display_name
-
-
-        # Try to match any two groups of digits separated by anything on the same line
-        if score_match := re.search(
-            r"^[^\d]*(\d{1,4})[^\d\v]+(\d{1,4})[^\d]*$",
-            message.content,
-            re.MULTILINE
-        ):
-            entry.player1_score = int(score_match[1])
-            entry.player2_score = int(score_match[2])
-
-        # Try to match "maps: http://" or "map draft: http://..." with
-        # optional whitespace everywhere and case ignored
-        if mapdraft_match := re.search(
-            r"maps?(?:\s+draft)?\s*:?\s*([^\s]+)", message.content, re.IGNORECASE
-        ):
-            entry.map_draft = mapdraft_match[1]
-
-        # Try to match "civs: http://..." or "civ draft: http://..." with
-        # optional whitespace everywhere and case ignored
-        if civdraft_match := re.search(
-            r"civs?(?:\s+draft)?\s*:?\s*([^\s]+)", message.content, re.IGNORECASE
-        ):
-            entry.civ_draft = civdraft_match[1]
-
+        entry.player1_name = (await self.fetch_user(entry.player1_id)).display_name
+        entry.player2_name = (await self.fetch_user(entry.player2_id)).display_name
         download_links = []
         for idx, attachment in enumerate(message.attachments):
             attachment_io = io.BytesIO()
