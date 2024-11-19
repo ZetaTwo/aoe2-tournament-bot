@@ -14,7 +14,10 @@ Drive:
 - Create Sheet and share with service account
 
 gcloud auth application-default login --impersonate-service-account tournament-bot@aoe2-tournaments.iam.gserviceaccount.com
+
 gcloud compute instances update-container aoe2-tournament-bot --zone europe-north1-b --container-image europe-north1-docker.pkg.dev/aoe2-tournaments/aoe2-tournament-bot/aoe2-tournament-bot:latest
+gcloud compute instances set-service-account aoe2-tournament-bot --scopes=cloud-platform,https://www.googleapis.com/auth/spreadsheets --service-account=tournament-bot@aoe2-tournaments.iam.gserviceaccount.com --zone=europe-north1-b
+
 
 
 "Message link",

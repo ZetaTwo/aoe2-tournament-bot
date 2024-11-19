@@ -136,27 +136,37 @@ class AoE2TournamentBot(discord.Client):
         ):
             entry.bracket = category.name
 
-        # Try to match @User ||3-2|| @User with the spoiler markers and all whitespace being optional
-        if score_match := re.search(
-            r"<@(\d+)>\s*(?:\|\|)?\s*(\d+)\s*-\s*(\d+)\s*(?:\|\|)?\s*<@(\d+)>",
-            message.content,
-        ):
-            entry.player1_id = int(score_match[1])
-            entry.player1_name = (await self.fetch_user(entry.player1_id)).display_name
-            entry.player1_score = int(score_match[2])
-            entry.player2_id = int(score_match[4])
-            entry.player2_name = (await self.fetch_user(entry.player2_id)).display_name
-            entry.player2_score = int(score_match[3])
+        # Find @User tags, hopefully from the "@User vs @User" part of the message
+        if players_match := re.findall(r'<@(\d+)>', message.content):
+            if len(players_match) != 2:
+                logger.info('Found %d players in the message, expected 2', len(players_match))
+            else:
+                entry.player1_id = int(players_match[0])
+                entry.player1_name = (await self.fetch_user(entry.player1_id)).display_name
+                entry.player2_id = int(players_match[1])
+                entry.player2_name = (await self.fetch_user(entry.player2_id)).display_name
 
-        # Try to match "map draft: http://..." with optional whitespace everywhere and case ignored
+
+        # Try to match any two groups of digits separated by anything on the same line
+        if score_match := re.search(
+            r"^[^\d]*(\d{1,4})[^\d\v]+(\d{1,4})[^\d]*$",
+            message.content,
+            re.MULTILINE
+        ):
+            entry.player1_score = int(score_match[1])
+            entry.player2_score = int(score_match[2])
+
+        # Try to match "maps: http://" or "map draft: http://..." with
+        # optional whitespace everywhere and case ignored
         if mapdraft_match := re.search(
-            r"map\s+draft\s*:?\s*([^\s]+)", message.content, re.IGNORECASE
+            r"maps?(?:\s+draft)?\s*:?\s*([^\s]+)", message.content, re.IGNORECASE
         ):
             entry.map_draft = mapdraft_match[1]
 
-        # Try to match "civ draft: http://..." with optional whitespace everywhere and case ignored
+        # Try to match "civs: http://..." or "civ draft: http://..." with
+        # optional whitespace everywhere and case ignored
         if civdraft_match := re.search(
-            r"civ\s+draft\s*:?\s*([^\s]+)", message.content, re.IGNORECASE
+            r"civs?(?:\s+draft)?\s*:?\s*([^\s]+)", message.content, re.IGNORECASE
         ):
             entry.civ_draft = civdraft_match[1]
 
