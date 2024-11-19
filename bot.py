@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import asyncio
 import dataclasses
 import io
 import logging
@@ -11,12 +10,10 @@ from typing import Optional, List, Any
 
 import coloredlogs
 import discord
-from flask import Flask
-from google.auth.transport.requests import Request
+import google.auth
 from google.cloud import storage
 from google.oauth2.credentials import Credentials
 from googleapiclient import discovery
-from werkzeug import run_simple
 
 logger = logging.getLogger("AoE2TournamentBot")
 coloredlogs.install(level="INFO")
@@ -24,10 +21,12 @@ coloredlogs.install(level="INFO")
 ADMIN_USER_ID = int(os.environ["ADMIN_USER_ID"])
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 GCS_BUCKET = os.environ["GCS_BUCKET"]
-GOOGLE_API_TOKEN_PATH = os.environ.get("GOOGLE_API_TOKEN_PATH", "token.json")
+SHEET_ID = os.environ["SHEET_ID"]
 
 SHEET_NAME = "AoE2 Results"
-GOOGLE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+GOOGLE_SCOPES = [
+    "https://www.googleapis.com/auth/drive",
+]
 
 RESULTS_CHANNELS = ["results"]
 
@@ -70,99 +69,14 @@ class ResultsEntry:
         ]
 
 
-def get_google_credentials() -> Optional[Credentials]:
-    try:
-        creds = Credentials.from_authorized_user_file(
-            str(GOOGLE_API_TOKEN_PATH), GOOGLE_SCOPES
-        )
-    except:
-        logger.error(
-            "No token.json found. Please set up Google API credentials manually first"
-        )
-        return None
-
-    return google_ensure_credentials(creds)
-
-
-def google_ensure_credentials(creds: Credentials) -> Optional[Credentials]:
-    if creds.valid:
-        return creds
-
-    if creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-        except Exception as e:
-            logger.error("Failed to refresh Google API credentials, error: %s", str(e))
-            return None
-    else:
-        logger.error("Google API credentials are not valid")
-        return None
-
-    with open("token.json", "w") as token:
-        token.write(creds.to_json())
-
-    return creds
-
-
-def get_replay_sheet_id(creds: Credentials) -> Optional[str]:
-    valid_creds = google_ensure_credentials(creds)
-    if not valid_creds:
-        return None
-
-    files = discovery.build("drive", "v3", credentials=valid_creds)
-    filelist = files.files().list(q=f'name = "{SHEET_NAME}"').execute()
-
-    if len(filelist["files"]) > 1:
-        logger.error('Multiple files named "{SHEET_NAME}"')
-        return None
-    elif len(filelist["files"]) == 1:
-        results_sheet = filelist["files"][0]
-        logger.info("Found results spreadsheet with id %s", results_sheet["id"])
-        existing_sheet_id: str = results_sheet["id"]
-        return existing_sheet_id
-    elif len(filelist["files"]) == 0:
-        sheets = discovery.build("sheets", "v4", credentials=valid_creds)
-        spreadsheet = {"properties": {"title": SHEET_NAME}}
-        results_sheet = (
-            sheets.spreadsheets()
-            .create(body=spreadsheet, fields="spreadsheetId")
-            .execute()
-        )
-        logger.info(
-            "Created new results spreadsheet with id %s", results_sheet["spreadsheetId"]
-        )
-
-        created_sheet_id: str = results_sheet["spreadsheetId"]
-        sheet_append_row(
-            valid_creds,
-            created_sheet_id,
-            [
-                "Message link",
-                "Poster Display Name",
-                "Bracket",
-                "Player 1 ID",
-                "Player 1 Display Name",
-                "Player 1 Score",
-                "Player 2 Display Name",
-                "Player 2 ID",
-                "Player 2 Score",
-                "Map Draft",
-                "Civ Draft",
-                "Replay links",
-                "Message contents",
-            ],
-        )
-        return created_sheet_id
-    else:
-        logger.error("File list has negative length")
-        return None
+def get_google_credentials():
+    credentials, project_id = google.auth.default(scopes=GOOGLE_SCOPES)
+    logger.info('Logged into GCP project "%s"', project_id)
+    return credentials
 
 
 def sheet_append_row(creds: Credentials, sheet_id: str, row: List[str]) -> bool:
-    valid_creds = google_ensure_credentials(creds)
-    if not valid_creds:
-        return False
-    sheets = discovery.build("sheets", "v4", credentials=valid_creds)
+    sheets = discovery.build("sheets", "v4", credentials=creds)
     values = [row]
 
     body = {"values": values}
@@ -177,6 +91,13 @@ def sheet_append_row(creds: Credentials, sheet_id: str, row: List[str]) -> bool:
     )
 
     return True
+
+
+def validate_sheet_id(creds: Credentials, sheet_id: str) -> str:
+    sheets = discovery.build("sheets", "v4", credentials=creds)
+    sheet = sheets.spreadsheets().get(spreadsheetId=sheet_id).execute()
+    logger.info('Writing to sheet titled "%s"', sheet["properties"]["title"])
+    return sheet['spreadsheetId']
 
 
 def upload_gcs_file(filename: str, contents: bytes) -> None:
@@ -282,19 +203,7 @@ class AoE2TournamentBot(discord.Client):
             )
 
 
-app = Flask(__name__)
-
-
-@app.route("/")
-def app_status():
-    return {"status": "ok"}
-
-
-async def serve_flask(app: Flask):
-    app.run("0.0.0.0", port=8080, debug=False)
-
-
-async def main() -> int:
+def main() -> int:
     logger.info('Replays will be saved to bucket "%s"', GCS_BUCKET)
     logger.info("Errors will be sent to user %d", ADMIN_USER_ID)
 
@@ -304,25 +213,17 @@ async def main() -> int:
 
     logger.info("Google API credentials valid")
 
-    results_sheet_id = get_replay_sheet_id(google_credentials)
+    results_sheet_id = validate_sheet_id(google_credentials, SHEET_ID)
     if not results_sheet_id:
         return 1
 
     logger.info("Results sheet set up")
 
     client = AoE2TournamentBot(google_credentials, results_sheet_id)
-    bot_task = client.start(DISCORD_TOKEN)
-    server_task = serve_flask(app)
-
-    try:
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(bot_task, name="Bot task")
-            tg.create_task(server_task, name="HTTP task")
-    except asyncio.CancelledError:
-        logger.info("Shutting down...")
-
+    client.run(DISCORD_TOKEN, log_handler=None)
+    logger.info("Shutting down...")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    sys.exit(main())
