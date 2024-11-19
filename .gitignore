@@ -1,7 +1,3 @@
 .mypy_cache/
 .env
-credentials.json
 aoe2-tournament-bot.hash
-
-service-account.json
-token.json

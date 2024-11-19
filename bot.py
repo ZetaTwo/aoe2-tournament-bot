@@ -25,7 +25,7 @@ SHEET_ID = os.environ["SHEET_ID"]
 
 SHEET_NAME = "AoE2 Results"
 GOOGLE_SCOPES = [
-    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/spreadsheets",
 ]
 
 RESULTS_CHANNELS = ["results"]
