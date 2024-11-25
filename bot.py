@@ -28,7 +28,7 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
 ]
 
-RESULTS_CHANNELS = ["results"]
+EXTRA_RESULTS_CHANNELS = []
 
 
 def optstr(x: Optional[Any]) -> str:
@@ -145,6 +145,15 @@ def parse_message_content(entry: ResultsEntry, content: str) -> ResultsEntry:
     return entry
 
 
+def is_results_channel(channel_name: str) -> bool:
+    if channel_name.endswith('results'):
+        return True
+    if channel_name.startswith('results'):
+        return True
+    if channel_name in EXTRA_RESULTS_CHANNELS:
+        return True
+    return False
+
 class AoE2TournamentBot(discord.Client):
     def __init__(self, google_credentials: Credentials, results_sheet_id: str):
         self.google_credentials = google_credentials
@@ -195,6 +204,7 @@ class AoE2TournamentBot(discord.Client):
 
         entry.replays_link = "\n".join(download_links)
         return entry
+    
 
     async def process_message(self, message: discord.Message) -> None:
         if message.author == self.user:
@@ -203,12 +213,18 @@ class AoE2TournamentBot(discord.Client):
         if not isinstance(message.channel, discord.TextChannel):
             return
 
-        if message.channel.name not in RESULTS_CHANNELS:
+        if not is_results_channel(message.channel.name):
             return
+
+        logger.info(
+            "Trying to process message with id %d as a results message", message.id
+        )
 
         entry = await self.construct_results_entry(message)
         if not entry:
-            logger.info("The message does not seem to be a valid result")
+            logger.info(
+                "The message with id %d does not seem to be a valid result", message.id
+            )
             return
 
         logger.info("Creating results entry for message %d", message.id)
@@ -217,17 +233,18 @@ class AoE2TournamentBot(discord.Client):
             self.google_credentials, self.results_sheet_id, entry.get_row()
         ):
             await self.report_admin_error(
-                "Failed to append results row. Please check logs"
+                "Failed to append results row for message %d. Please check logs",
+                message.id,
             )
 
     async def on_message(self, message: discord.Message) -> None:
-        logger.info("Processing new results message with ID %d", message.id)
+        logger.debug("Processing new message with ID %d", message.id)
         return await self.process_message(message)
 
     async def on_message_edit(
         self, before: discord.Message, after: discord.Message
     ) -> None:
-        logger.info("Processing updated results message with ID %d", after.id)
+        logger.debug("Processing updated message with ID %d", after.id)
         return await self.process_message(after)
 
 
