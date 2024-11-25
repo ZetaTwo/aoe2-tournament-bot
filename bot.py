@@ -146,13 +146,14 @@ def parse_message_content(entry: ResultsEntry, content: str) -> ResultsEntry:
 
 
 def is_results_channel(channel_name: str) -> bool:
-    if channel_name.endswith('results'):
+    if channel_name.endswith("results"):
         return True
-    if channel_name.startswith('results'):
+    if channel_name.startswith("results"):
         return True
     if channel_name in EXTRA_RESULTS_CHANNELS:
         return True
     return False
+
 
 class AoE2TournamentBot(discord.Client):
     def __init__(self, google_credentials: Credentials, results_sheet_id: str):
@@ -204,7 +205,6 @@ class AoE2TournamentBot(discord.Client):
 
         entry.replays_link = "\n".join(download_links)
         return entry
-    
 
     async def process_message(self, message: discord.Message) -> None:
         if message.author == self.user:
