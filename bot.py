@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import sys
+from datetime import datetime, timezone
 from typing import Optional, List, Any
 
 import coloredlogs
@@ -229,8 +230,10 @@ class AoE2TournamentBot(discord.Client):
 
         logger.info("Creating results entry for message %d", message.id)
 
+        now = datetime.now(tz=timezone.utc).replace(microsecond=0)
+        row_to_add = [now.isoformat()] + entry.get_row()
         if not sheet_append_row(
-            self.google_credentials, self.results_sheet_id, entry.get_row()
+            self.google_credentials, self.results_sheet_id, row_to_add
         ):
             await self.report_admin_error(
                 "Failed to append results row for message %d. Please check logs",
