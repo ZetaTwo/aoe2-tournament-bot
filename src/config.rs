@@ -57,12 +57,19 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn load(path: &Path) -> Result<Self> {
+    pub fn load(config_path: &Path, tournaments_path: &Path) -> Result<Self> {
         let raw: RawConfig = Figment::new()
-            .merge(Toml::file(path))
+            .merge(Toml::file(config_path))
+            .merge(Toml::file(tournaments_path))
             .merge(Env::prefixed("AOE2BOT_").split("__"))
             .extract()
-            .with_context(|| format!("loading config from {}", path.display()))?;
+            .with_context(|| {
+                format!(
+                    "loading config from {} + {}",
+                    config_path.display(),
+                    tournaments_path.display()
+                )
+            })?;
         validate(raw)
     }
 }

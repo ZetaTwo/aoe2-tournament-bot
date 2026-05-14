@@ -26,8 +26,15 @@ async fn main() -> Result<()> {
     let config_path = std::env::var_os("CONFIG_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("config.toml"));
-    info!("Loading config from {}", config_path.display());
-    let config = Arc::new(Config::load(&config_path)?);
+    let tournaments_path = std::env::var_os("TOURNAMENTS_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("tournaments.toml"));
+    info!(
+        "Loading config from {} and tournaments from {}",
+        config_path.display(),
+        tournaments_path.display()
+    );
+    let config = Arc::new(Config::load(&config_path, &tournaments_path)?);
 
     info!("Replays will be saved to bucket \"{}\"", config.gcp.bucket);
     info!(

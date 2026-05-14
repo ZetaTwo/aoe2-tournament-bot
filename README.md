@@ -22,12 +22,20 @@ every user listed in `admin_user_ids` is DM'd.
 
 ## Configuration
 
-All configuration lives in a TOML file. The bot reads `./config.toml` by
-default, or the path set in `CONFIG_PATH`. Log level is controlled by
-`RUST_LOG` (e.g. `info`, `debug,serenity=warn`).
+Configuration is split across two TOML files that are merged at startup:
 
-See [config.example.toml](config.example.toml) for the full schema. A
-tournament block looks like:
+- [tournaments.toml](tournaments.toml) — tournament-to-channel routing.
+  Checked into git and baked into the container image, so changes need a
+  push-to-`main` (which CI builds + deploys). Default path
+  `./tournaments.toml`, overridable via `TOURNAMENTS_PATH`.
+- `config.toml` — Discord token, admin IDs, GCP bucket/sheet ID. Never
+  committed; stored in Secret Manager (`aoe2-tournament-bot-config`) in
+  production. Default path `./config.toml`, overridable via `CONFIG_PATH`.
+  See [config.example.toml](config.example.toml) for the schema.
+
+Log level is controlled by `RUST_LOG` (e.g. `info`, `debug,serenity=warn`).
+
+A tournament block looks like:
 
 ```toml
 [[tournaments]]
@@ -46,7 +54,7 @@ anything that no specific tournament claimed.
 
 Sheet tabs referenced by `name` are created on startup if they don't exist
 yet, so adding a new tournament just means adding a `[[tournaments]]` block
-and rolling a new revision.
+to [tournaments.toml](tournaments.toml) and pushing to `main`.
 
 ## Sheet columns
 
@@ -67,7 +75,9 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 cargo build --release
 
-cp config.example.toml config.toml   # then edit
+cp config.example.toml config.toml   # then edit (token, sheet ID, etc.)
+# tournaments.toml is already in the repo — edit it directly if you want
+# to test routing changes locally.
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json \
     cargo run --release
 ```
@@ -86,10 +96,13 @@ on every push to `main`. It runs as a Cloud Run Worker Pool
   Repo variables `WIF_PROVIDER` and `DEPLOYER_SA` are output by Terraform
   (see below) and set with `gh variable set`.
 - **Config / secrets**: `config.toml` lives in Secret Manager as
-  `aoe2-tournament-bot-config` and is mounted at `/app/config.toml` in the
-  Worker Pool. Rotating the Discord token = `gcloud secrets versions add ...`
-  followed by `gcloud run worker-pools update aoe2-tournament-bot
-  --region=europe-north1` to roll the revision.
+  `aoe2-tournament-bot-config` and is mounted at
+  `/etc/aoe2-tournament-bot/config.toml` in the Worker Pool (the bot finds
+  it via `CONFIG_PATH`). Rotating the Discord token =
+  `gcloud secrets versions add ...` followed by
+  `gcloud run worker-pools update aoe2-tournament-bot --region=europe-north1`
+  to roll the revision. `tournaments.toml` is *not* in the secret — it's
+  baked into the image, so a routing change is a `git push` to `main`.
 - **Infrastructure-as-code**: everything one-time (WIF, the deployer SA,
   the Artifact Registry repo, the config secret, the Worker Pool itself)
   is described in [terraform/](terraform/). See [terraform/README.md](terraform/README.md)

@@ -6,7 +6,8 @@ Worker Pools from GitHub Actions:
 - Workload Identity Federation pool + provider for GitHub OIDC
 - A dedicated `github-deployer` service account + IAM bindings
 - The `aoe2-tournament-bot` Artifact Registry repo
-- A Secret Manager secret holding `config.toml`
+- A Secret Manager secret holding `config.toml` (token / sheet ID / bucket
+  — *not* the tournament list, which is baked into the image)
 - The Cloud Run Worker Pool itself
 
 It does **not** manage:
@@ -104,7 +105,10 @@ easier debugging.
 ## Day-to-day
 
 - **Deploy code changes**: push to `main`, the CI workflow handles it.
-- **Rotate the Discord token or update tournaments**: see step 4 above.
+- **Rotate the Discord token**: see step 4 above.
+- **Add/edit tournaments**: edit [tournaments.toml](../tournaments.toml) and
+  push to `main`; CI rebuilds the image with the new file and rolls the
+  Worker Pool to it.
 - **Change infra (e.g. bump worker pool memory)**: edit the `.tf` files,
   `terraform plan`, `terraform apply`.
 

@@ -19,6 +19,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /build/target/release/aoe2-tournament-bot /usr/local/bin/aoe2-tournament-bot
 
 WORKDIR /app
-# Mount /app/config.toml at runtime. CONFIG_PATH can override the path.
+# Tournament routing is checked into git and baked into the image.
+COPY tournaments.toml ./tournaments.toml
+# Secrets/per-env config (config.toml) is provided at runtime — locally as a
+# bind mount, in production from Secret Manager. The Worker Pool sets
+# CONFIG_PATH to the mounted location; for local runs the default
+# ./config.toml works.
 ENV RUST_LOG=info
 CMD ["/usr/local/bin/aoe2-tournament-bot"]

@@ -54,21 +54,28 @@ the bot inspects the spreadsheet and adds any missing tabs whose names
 match a configured `[[tournaments]] name` (see
 [src/sheets.rs:77-112](src/sheets.rs#L77-L112)).
 
-## 2. Write the production `config.toml`
+## 2. Edit `tournaments.toml` and write `config.toml`
 
-Copy `config.example.toml` to `config.toml` and fill in:
+Configuration is split across two files:
+
+**`tournaments.toml`** — checked into git, baked into the image. Edit and
+commit (no need to wait until later — pushing to `main` after step 4 will
+roll a build that includes it):
+
+- Add a `[[tournaments]]` block per Discord category/channel-pattern you
+  want to capture.
+- Keep the trailing `catch_all = true` block as a backstop.
+
+**`config.toml`** — local-only, ends up in Secret Manager. Copy
+`config.example.toml` to `config.toml` and fill in:
 
 - `bot.discord_token` — same value the GCE VM uses today.
 - `bot.admin_user_ids` — at least the existing `ADMIN_USER_ID`; can be a
   list.
 - `gcp.bucket` — `aoe2-tournament-replays`.
 - `gcp.sheet_id` — same `SHEET_ID` as today.
-- `[[tournaments]]` blocks — one per Discord category/channel-pattern you
-  want to capture. `name` must match a sheet tab from step 1. A trailing
-  `catch_all = true` entry is recommended.
 
-Do **not** commit `config.toml` (`.gitignore` already excludes it). The
-contents end up in Secret Manager, not the repo.
+Do **not** commit `config.toml` (`.gitignore` already excludes it).
 
 ## 3. Bootstrap Terraform-managed infra
 

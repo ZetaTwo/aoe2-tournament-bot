@@ -40,9 +40,16 @@ resource "google_cloud_run_v2_worker_pool" "bot" {
         value = "info"
       }
 
+      # The mount sits outside /app so it doesn't shadow the baked-in
+      # /app/tournaments.toml.
+      env {
+        name  = "CONFIG_PATH"
+        value = "/etc/aoe2-tournament-bot/config.toml"
+      }
+
       volume_mounts {
         name       = "config"
-        mount_path = "/app"
+        mount_path = "/etc/aoe2-tournament-bot"
       }
     }
 

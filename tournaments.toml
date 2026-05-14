@@ -1,0 +1,40 @@
+# Tournaments are matched in order against each incoming message. A
+# tournament matches when:
+#   - `guild_id` is unset OR equals the message's guild ID, AND
+#   - `category` is unset OR equals the message's Discord category name, AND
+#   - `channel_pattern` (a regex) matches the channel name.
+# The first matching tournament wins. A trailing entry with `catch_all = true`
+# is the only place where `guild_id` can be omitted; it catches anything not
+# claimed by a more specific tournament.
+#
+# `name` is used as the Google Sheet tab; the GCS object-key prefix is the
+# kebab-cased name plus "/".
+
+[[tournaments]]
+name = "Spec 2: Continental"
+guild_id = 724280954017022013
+category = "Continental"
+channel_pattern = "^.*-results$"
+
+[[tournaments]]
+name = "Spec 2: Stronghold"
+guild_id = 724280954017022013
+category = "Stronghold"
+channel_pattern = "^.*-results$"
+
+[[tournaments]]
+name = "Spec 2: Thalassocracy"
+guild_id = 724280954017022013
+category = "Thalassocracy"
+channel_pattern = "^.*-results$"
+
+[[tournaments]]
+name = "Spec 2: Nomad"
+guild_id = 724280954017022013
+category = "Nomad"
+channel_pattern = "^.*-results$"
+
+[[tournaments]]
+name = "Unknown"
+catch_all = true
+channel_pattern = "^(results.*|.*results)$"
