@@ -3,6 +3,9 @@
 resource "google_cloud_run_v2_worker_pool" "bot" {
   provider = google-beta
 
+   client                  = "gcloud"
+   client_version          = "568.0.0"
+
   name     = var.worker_pool_name
   location = var.gcp_region
 
