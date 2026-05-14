@@ -32,6 +32,7 @@ pub struct GcpConfig {
 struct RawTournament {
     name: String,
     guild_id: Option<u64>,
+    category: Option<String>,
     channel_pattern: String,
     #[serde(default)]
     catch_all: bool,
@@ -41,6 +42,7 @@ struct RawTournament {
 pub struct Tournament {
     pub name: String,
     pub guild_id: Option<u64>,
+    pub category: Option<String>,
     pub channel_pattern: Regex,
     pub catch_all: bool,
     pub sheet_tab: String,
@@ -94,6 +96,7 @@ fn validate(raw: RawConfig) -> Result<Config> {
         tournaments.push(Tournament {
             name: t.name.clone(),
             guild_id: t.guild_id,
+            category: t.category.clone(),
             channel_pattern: pattern,
             catch_all: t.catch_all,
             sheet_tab: t.name.clone(),

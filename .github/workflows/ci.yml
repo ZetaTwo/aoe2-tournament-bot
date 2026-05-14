@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GCP_PROJECT: aoe2-tournaments
+  GCP_REGION: europe-north1
+  AR_HOST: europe-north1-docker.pkg.dev
+  AR_REPO: aoe2-tournament-bot
+  IMAGE_NAME: aoe2-tournament-bot
+  WORKER_POOL: aoe2-tournament-bot
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked
+
+  lint:
+    runs-on: ubuntu-latest
+    # NOTE: deliberately NOT a dependency of `deploy` — fmt/clippy noise must
+    # not block a fix from shipping.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --tests -- -D warnings
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # required for WIF
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker auth
+        run: gcloud auth configure-docker ${{ env.AR_HOST }} --quiet
+
+      - name: Build and push image
+        env:
+          IMAGE_BASE: ${{ env.AR_HOST }}/${{ env.GCP_PROJECT }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}
+        run: |
+          docker build \
+            --tag "$IMAGE_BASE:${{ github.sha }}" \
+            --tag "$IMAGE_BASE:latest" \
+            .
+          docker push "$IMAGE_BASE:${{ github.sha }}"
+          docker push "$IMAGE_BASE:latest"
+
+      - name: Update Worker Pool
+        run: |
+          gcloud run worker-pools update ${{ env.WORKER_POOL }} \
+            --image="${{ env.AR_HOST }}/${{ env.GCP_PROJECT }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" \
+            --region=${{ env.GCP_REGION }} \
+            --project=${{ env.GCP_PROJECT }}

@@ -34,15 +34,19 @@ tournament block looks like:
 name = "SF 2026"        # also used as the sheet tab name; "sf-2026/" is
                          # derived as the GCS object-key prefix.
 guild_id = 1308197621223002112
+category = "SF 2026 Bracket"   # optional; if set, message's Discord
+                                # category name must equal this exactly.
 channel_pattern = "^sf-.*-results$"
 ```
 
-Tournaments are matched in order; the first match wins. A trailing entry
-with `catch_all = true` (and `guild_id` omitted) catches anything that no
-specific tournament claimed.
+Tournaments are matched in order; the first match wins. All set
+conditions (`guild_id`, `category`, `channel_pattern`) must match. A
+trailing entry with `catch_all = true` (and `guild_id` omitted) catches
+anything that no specific tournament claimed.
 
-Sheet tabs referenced by `name` must already exist in the spreadsheet; the
-bot verifies them on startup and refuses to start otherwise.
+Sheet tabs referenced by `name` are created on startup if they don't exist
+yet, so adding a new tournament just means adding a `[[tournaments]]` block
+and rolling a new revision.
 
 ## Sheet columns
 
@@ -68,57 +72,56 @@ GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json \
     cargo run --release
 ```
 
-## Current deployment
+## Deployment
 
-Deployment-as-it-stands today. The Rust port introduces a config file
-mount, but the rest of the infra is unchanged. Reconsidering this is
-explicitly deferred.
+The bot is built and rolled forward by [.github/workflows/ci.yml](.github/workflows/ci.yml)
+on every push to `main`. It runs as a Cloud Run Worker Pool
+(`aoe2-tournament-bot` in `europe-north1`) under the GCP project
+`aoe2-tournaments`.
 
-- **GCP project**: `aoe2-tournaments`.
-- **Service account**: `tournament-bot@aoe2-tournaments.iam.gserviceaccount.com`,
-  attached to the VM. Scopes `cloud-platform` and
-  `https://www.googleapis.com/auth/spreadsheets`.
-- **Artifact Registry**:
-  `europe-north1-docker.pkg.dev/aoe2-tournaments/aoe2-tournament-bot/aoe2-tournament-bot:latest`.
-- **Compute**: GCE Container-Optimized OS VM named `aoe2-tournament-bot` in
-  `europe-north1-b`. Updated via `gcloud compute instances update-container`.
-  Auth to GCS / Sheets uses the attached service account through the GCE
-  metadata server (no key file required on the VM).
-- **GCS bucket**: `aoe2-tournament-replays` (configured per tournament via
-  the derived `{name-kebab}/` prefix).
-- **Sheet**: shared with the service account; tabs must be created
-  out-of-band before adding a tournament to the config.
-- **Discord OAuth invite**:
-  https://discord.com/oauth2/authorize?client_id=1308197621223002112
-- **Google Drive API**:
-  https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=1086054497785
+- **Code path**: push to `main` → `cargo test` job runs → on success, the
+  `deploy` job builds the image, pushes it tagged `:<sha>` and `:latest` to
+  Artifact Registry, then `gcloud run worker-pools update`s the pool.
+- **Auth from GitHub to GCP**: Workload Identity Federation. No JSON keys.
+  Repo variables `WIF_PROVIDER` and `DEPLOYER_SA` are output by Terraform
+  (see below) and set with `gh variable set`.
+- **Config / secrets**: `config.toml` lives in Secret Manager as
+  `aoe2-tournament-bot-config` and is mounted at `/app/config.toml` in the
+  Worker Pool. Rotating the Discord token = `gcloud secrets versions add ...`
+  followed by `gcloud run worker-pools update aoe2-tournament-bot
+  --region=europe-north1` to roll the revision.
+- **Infrastructure-as-code**: everything one-time (WIF, the deployer SA,
+  the Artifact Registry repo, the config secret, the Worker Pool itself)
+  is described in [terraform/](terraform/). See [terraform/README.md](terraform/README.md)
+  for the bootstrap order.
 
-### Deploy commands
+### Bot runtime service account
+
+`tournament-bot@aoe2-tournaments.iam.gserviceaccount.com` (predates this
+repo). The Terraform module grants it `roles/secretmanager.secretAccessor`
+on the config secret; its existing Sheets API and `aoe2-tournament-replays`
+GCS bucket permissions carry over.
+
+### Useful links
+
+- Discord invite: https://discord.com/oauth2/authorize?client_id=1308197621223002112
+- Google Drive API: https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=1086054497785
+
+### Local impersonation for testing
 
 ```sh
-# build image
-make            # produces aoe2-tournament-bot.hash
-# push image
-make publish
-# tell the VM to redeploy
-gcloud compute instances update-container aoe2-tournament-bot \
-    --zone europe-north1-b \
-    --container-image europe-north1-docker.pkg.dev/aoe2-tournaments/aoe2-tournament-bot/aoe2-tournament-bot:latest
-# (one-off) re-bind service account / scopes
-gcloud compute instances set-service-account aoe2-tournament-bot \
-    --scopes=cloud-platform,https://www.googleapis.com/auth/spreadsheets \
-    --service-account=tournament-bot@aoe2-tournaments.iam.gserviceaccount.com \
-    --zone=europe-north1-b
-# local impersonation for testing
 gcloud auth application-default login \
     --impersonate-service-account tournament-bot@aoe2-tournaments.iam.gserviceaccount.com
+cargo run --release
 ```
 
-### Note on the config file in deployment
+### Retiring the old GCE VM
 
-The Python version configured everything via env vars set on the VM
-container spec. The Rust version expects a `config.toml` mounted at
-`/app/config.toml`. The VM container spec needs updating to mount this
-file (e.g. via a startup script that pulls it from a GCS bucket, or via
-GCE metadata). **This is intentionally not done yet** — the user wants to
-reconsider deployment separately.
+The previous deployment was a Container-Optimized OS GCE VM
+(`aoe2-tournament-bot` in `europe-north1-b`) updated via
+`gcloud compute instances update-container`. Once the Worker Pool has been
+verified end-to-end, retire it manually:
+
+```sh
+gcloud compute instances delete aoe2-tournament-bot --zone=europe-north1-b
+```

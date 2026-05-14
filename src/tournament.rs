@@ -6,6 +6,7 @@ use crate::config::Tournament;
 pub struct MatchInput<'a> {
     pub guild_id: Option<u64>,
     pub channel_name: &'a str,
+    pub category: Option<&'a str>,
 }
 
 pub fn match_tournament<'a>(
@@ -37,6 +38,11 @@ fn tournament_matches(t: &Tournament, input: MatchInput<'_>) -> bool {
             return false;
         }
     }
+    if let Some(want_cat) = t.category.as_deref() {
+        if input.category != Some(want_cat) {
+            return false;
+        }
+    }
     t.channel_pattern.is_match(input.channel_name)
 }
 
@@ -46,9 +52,20 @@ mod tests {
     use regex::Regex;
 
     fn t(name: &str, guild: Option<u64>, pat: &str, catch_all: bool) -> Tournament {
+        tc(name, guild, None, pat, catch_all)
+    }
+
+    fn tc(
+        name: &str,
+        guild: Option<u64>,
+        category: Option<&str>,
+        pat: &str,
+        catch_all: bool,
+    ) -> Tournament {
         Tournament {
             name: name.into(),
             guild_id: guild,
+            category: category.map(str::to_string),
             channel_pattern: Regex::new(pat).unwrap(),
             catch_all,
             sheet_tab: name.into(),
@@ -60,6 +77,15 @@ mod tests {
         MatchInput {
             guild_id: guild,
             channel_name: channel,
+            category: None,
+        }
+    }
+
+    fn input_cat<'a>(guild: Option<u64>, channel: &'a str, category: &'a str) -> MatchInput<'a> {
+        MatchInput {
+            guild_id: guild,
+            channel_name: channel,
+            category: Some(category),
         }
     }
 
@@ -119,5 +145,61 @@ mod tests {
     fn non_results_channel_in_configured_guild_does_not_match() {
         let tournaments = vec![t("SF", Some(100), "^.*results.*$", false)];
         assert!(match_tournament(&tournaments, input(Some(100), "general")).is_none());
+    }
+
+    #[test]
+    fn category_constraint_matches_when_equal() {
+        let tournaments = vec![tc(
+            "SF",
+            Some(100),
+            Some("Recruit SF Bracket"),
+            "^.*results.*$",
+            false,
+        )];
+        let m = match_tournament(
+            &tournaments,
+            input_cat(Some(100), "r1-results", "Recruit SF Bracket"),
+        )
+        .unwrap();
+        assert_eq!(m.name, "SF");
+    }
+
+    #[test]
+    fn category_constraint_rejects_different_category() {
+        let tournaments = vec![tc(
+            "SF",
+            Some(100),
+            Some("Recruit SF Bracket"),
+            "^.*results.*$",
+            false,
+        )];
+        assert!(match_tournament(
+            &tournaments,
+            input_cat(Some(100), "r1-results", "General SF Bracket")
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn category_constraint_rejects_missing_category() {
+        let tournaments = vec![tc(
+            "SF",
+            Some(100),
+            Some("Recruit SF Bracket"),
+            "^.*results.*$",
+            false,
+        )];
+        assert!(match_tournament(&tournaments, input(Some(100), "r1-results")).is_none());
+    }
+
+    #[test]
+    fn unset_category_matches_regardless_of_message_category() {
+        let tournaments = vec![t("SF", Some(100), "^.*results.*$", false)];
+        let m = match_tournament(
+            &tournaments,
+            input_cat(Some(100), "r1-results", "Whatever Bracket"),
+        )
+        .unwrap();
+        assert_eq!(m.name, "SF");
     }
 }

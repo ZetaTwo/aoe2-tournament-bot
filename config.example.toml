@@ -16,14 +16,19 @@ sheet_id = "REPLACE_WITH_SHEET_ID"
 
 # Tournaments are matched in order against each incoming message:
 #   - `guild_id` (optional) restricts the match to one Discord server.
+#   - `category` (optional) restricts the match to channels under a specific
+#     Discord category (exact name match, case-sensitive). Omit to match
+#     channels under any category, or none.
 #   - `channel_pattern` is a regex over the channel name.
-# The first matching tournament wins. A trailing entry with `catch_all = true`
-# is the only place where `guild_id` can be omitted; it catches anything not
-# claimed by a more specific tournament.
+# All set conditions must match. The first matching tournament wins.
+# A trailing entry with `catch_all = true` is the only place where
+# `guild_id` can be omitted; it catches anything not claimed by a more
+# specific tournament.
 
 [[tournaments]]
 name = "SF 2026"
 guild_id = 0
+category = "SF 2026 Bracket"
 channel_pattern = "^sf-.*-results$"
 
 [[tournaments]]

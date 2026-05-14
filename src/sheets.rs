@@ -1,6 +1,9 @@
 use anyhow::{anyhow, Context, Result};
 use google_sheets4::{
-    api::{Sheets, ValueRange},
+    api::{
+        AddSheetRequest, BatchUpdateSpreadsheetRequest, Request, SheetProperties, Sheets,
+        ValueRange,
+    },
     hyper_rustls, hyper_util,
     yup_oauth2::{
         authenticator::ApplicationDefaultCredentialsTypes,
@@ -69,6 +72,43 @@ impl SheetsClient {
             .filter_map(|s| s.properties?.title)
             .collect();
         Ok(tabs)
+    }
+
+    pub async fn ensure_tabs(&self, required: &[&str]) -> Result<()> {
+        let existing = self.list_tabs().await?;
+        let missing: Vec<&str> = required
+            .iter()
+            .copied()
+            .filter(|t| !existing.iter().any(|e| e == t))
+            .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        info!("Creating missing sheet tab(s): {:?}", missing);
+
+        let requests = missing
+            .iter()
+            .map(|tab| Request {
+                add_sheet: Some(AddSheetRequest {
+                    properties: Some(SheetProperties {
+                        title: Some((*tab).to_string()),
+                        ..Default::default()
+                    }),
+                }),
+                ..Default::default()
+            })
+            .collect();
+        let body = BatchUpdateSpreadsheetRequest {
+            requests: Some(requests),
+            ..Default::default()
+        };
+        self.hub
+            .spreadsheets()
+            .batch_update(body, &self.sheet_id)
+            .doit()
+            .await
+            .with_context(|| format!("creating sheet tabs {:?}", missing))?;
+        Ok(())
     }
 
     pub async fn append_row(&self, tab: &str, row: Vec<String>) -> Result<()> {

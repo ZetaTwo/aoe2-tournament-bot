@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Arc};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use serenity::{all::GatewayIntents, Client};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -45,22 +45,10 @@ async fn main() -> Result<()> {
         .iter()
         .map(|t| t.sheet_tab.as_str())
         .collect();
-    let existing_tabs = sheets
-        .list_tabs()
+    sheets
+        .ensure_tabs(&configured_tabs)
         .await
-        .context("listing spreadsheet tabs")?;
-    let missing: Vec<&str> = configured_tabs
-        .iter()
-        .copied()
-        .filter(|t| !existing_tabs.iter().any(|e| e == *t))
-        .collect();
-    if !missing.is_empty() {
-        return Err(anyhow!(
-            "tournaments reference sheet tabs that do not exist: {:?} (have: {:?})",
-            missing,
-            existing_tabs
-        ));
-    }
+        .context("ensuring tournament tabs exist")?;
     info!(
         "Results sheet set up; {} tournament tab(s) verified",
         configured_tabs.len()

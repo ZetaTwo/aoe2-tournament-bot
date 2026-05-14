@@ -77,6 +77,7 @@ impl Handler {
         let input = MatchInput {
             guild_id: message.guild_id.map(|g| g.get()),
             channel_name: channel.name.as_str(),
+            category: category.as_deref(),
         };
         let tournament = match match_tournament(&self.config.tournaments, input) {
             Some(t) => t,
