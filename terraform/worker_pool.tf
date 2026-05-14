@@ -11,15 +11,18 @@ resource "google_cloud_run_v2_worker_pool" "bot" {
   # destroy/replace until you flip this to false and apply.
   deletion_protection = false
 
+  # Discord gateway is a single persistent WebSocket — we want exactly one
+  # instance running at all times, not autoscaled based on CPU.
   scaling {
-    min_instance_count = 1
-    max_instance_count = 1
+    manual_instance_count = 1
   }
 
   template {
     service_account = data.google_service_account.bot_runtime.email
 
     containers {
+      name = "aoe2-tournament-bot-1"
+
       # Placeholder. CI replaces this per-deploy via `gcloud run worker-pools
       # update --image=...`, which is why `ignore_changes` below masks it.
       image = "${local.ar_image_base}:latest"
@@ -29,6 +32,12 @@ resource "google_cloud_run_v2_worker_pool" "bot" {
           cpu    = "1"
           memory = "512Mi"
         }
+      }
+
+
+      env {
+        name  = "RUST_LOG"
+        value = "info"
       }
 
       volume_mounts {
