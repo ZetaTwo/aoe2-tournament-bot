@@ -1,0 +1,37 @@
+# Copy to config.toml and fill in the real values. The path is taken from
+# CONFIG_PATH (default ./config.toml). Tracing log level is set via RUST_LOG.
+
+[bot]
+discord_token = "REPLACE_ME"
+# At least one Discord user ID. All listed users receive a DM when a results
+# row fails to land in the sheet.
+admin_user_ids = [123456789012345678]
+
+[gcp]
+# Bucket that replay attachments are uploaded into. Each tournament gets its
+# own object-key prefix (derived from `name`).
+bucket = "aoe2-tournament-replays"
+# Spreadsheet ID. Each tournament writes to a tab named exactly after its `name`.
+sheet_id = "REPLACE_WITH_SHEET_ID"
+
+# Tournaments are matched in order against each incoming message:
+#   - `guild_id` (optional) restricts the match to one Discord server.
+#   - `channel_pattern` is a regex over the channel name.
+# The first matching tournament wins. A trailing entry with `catch_all = true`
+# is the only place where `guild_id` can be omitted; it catches anything not
+# claimed by a more specific tournament.
+
+[[tournaments]]
+name = "SF 2026"
+guild_id = 0
+channel_pattern = "^sf-.*-results$"
+
+[[tournaments]]
+name = "TG 2026"
+guild_id = 0
+channel_pattern = "^tg-.*-results$"
+
+[[tournaments]]
+name = "Unknown"
+catch_all = true
+channel_pattern = "^(results.*|.*results)$"

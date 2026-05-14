@@ -1,4 +1,5 @@
-__pycache__/
-.mypy_cache/
+target/
+config.toml
 .env
 aoe2-tournament-bot.hash
+service-account.json
