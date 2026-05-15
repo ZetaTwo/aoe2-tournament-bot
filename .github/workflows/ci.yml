@@ -57,22 +57,44 @@ jobs:
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.DEPLOYER_SA }}
+          # Short-lived token for docker/login-action below. Additive — does
+          # not affect gcloud auth used by the Update Worker Pool step.
+          token_format: 'access_token'
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Configure Docker auth
-        run: gcloud auth configure-docker ${{ env.AR_HOST }} --quiet
+      - uses: docker/setup-buildx-action@v3
+
+      # Authenticate the buildx (docker-container driver) builder to Artifact
+      # Registry. The old `gcloud auth configure-docker` cred-helper isn't
+      # reliably visible inside the build container, so log in with the WIF
+      # access token instead.
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.AR_HOST }}
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
 
       - name: Build and push image
+        uses: docker/build-push-action@v6
         env:
           IMAGE_BASE: ${{ env.AR_HOST }}/${{ env.GCP_PROJECT }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}
-        run: |
-          docker build \
-            --tag "$IMAGE_BASE:${{ github.sha }}" \
-            --tag "$IMAGE_BASE:latest" \
-            .
-          docker push "$IMAGE_BASE:${{ github.sha }}"
-          docker push "$IMAGE_BASE:latest"
+        with:
+          context: .
+          push: true
+          # build-push-action v6 defaults to emitting provenance/SBOM
+          # attestations, which turns the push into an OCI image index.
+          # Keep a single-manifest image so `:<sha>` pinning stays simple.
+          provenance: false
+          tags: |
+            ${{ env.IMAGE_BASE }}:${{ github.sha }}
+            ${{ env.IMAGE_BASE }}:latest
+          # cargo-chef dependency layer is only reused if the layer cache
+          # persists between (fresh) CI runners — back it with a registry
+          # cache image. The `buildcache` tag is excluded from the Artifact
+          # Registry cleanup policy (see terraform/artifact_registry.tf).
+          cache-from: type=registry,ref=${{ env.IMAGE_BASE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_BASE }}:buildcache,mode=max
 
       - name: Update Worker Pool
         run: |

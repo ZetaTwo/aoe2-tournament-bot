@@ -20,10 +20,16 @@ resource "google_artifact_registry_repository" "bot" {
 
   # Keep only the 5 most recent image versions. A KEEP-only policy is a
   # no-op (KEEP just protects artifacts from DELETE policies), so the
-  # "delete-all" policy sweeps everything and "keep-last-5" exempts the
-  # newest 5 — KEEP takes precedence over DELETE. CI rolls a fresh WP
-  # revision every push to main, so the live image is always the most
+  # "delete-all" policy sweeps everything and the KEEP policies exempt what
+  # we want to retain — KEEP takes precedence over DELETE. CI rolls a fresh
+  # WP revision every push to main, so the live image is always the most
   # recent; 5 leaves roughly a 4-deploy rollback window.
+  #
+  # The CI buildx registry cache lives in this same repo under the
+  # `buildcache` tag (see .github/workflows/ci.yml). "keep-buildcache"
+  # protects whatever currently carries that tag so a build can't evict its
+  # own cache; stale (now-untagged) older cache digests are NOT protected
+  # and get swept by "delete-all", which keeps cache storage bounded.
   cleanup_policies {
     id     = "delete-all"
     action = "DELETE"
@@ -37,6 +43,15 @@ resource "google_artifact_registry_repository" "bot" {
     action = "KEEP"
     most_recent_versions {
       keep_count = 5
+    }
+  }
+
+  cleanup_policies {
+    id     = "keep-buildcache"
+    action = "KEEP"
+    condition {
+      tag_state    = "TAGGED"
+      tag_prefixes = ["buildcache"]
     }
   }
 }
