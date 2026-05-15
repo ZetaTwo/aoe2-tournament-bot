@@ -24,6 +24,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Not used directly; keep it. Feature-unifies `hyper-rustls` onto the
 # yup-oauth2 google-sheets4 pulls, else its ADC `builder()` is cfg'd out.
 yup-oauth2 = { version = "12", default-features = false, features = ["hyper-rustls", "service-account"] }
+# Direct dep so main() can pin the rustls CryptoProvider (ring) — graph
+# pulls both ring and aws-lc-rs, leaving the process default ambiguous.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [dev-dependencies]
 pretty_assertions = "1"

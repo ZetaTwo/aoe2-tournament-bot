@@ -17,6 +17,13 @@ use crate::{config::Config, gcs::GcsClient, handler::Handler, sheets::SheetsClie
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // rustls 0.23 has both `ring` and `aws-lc-rs` compiled in (pulled by
+    // google-sheets4 and reqwest respectively), so it can't auto-select a
+    // process-level CryptoProvider. Pin it before any TLS handshake.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("install rustls ring CryptoProvider");
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
