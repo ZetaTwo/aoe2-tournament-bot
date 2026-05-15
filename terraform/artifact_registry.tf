@@ -15,7 +15,30 @@ resource "google_artifact_registry_repository" "bot" {
   docker_config {
     immutable_tags = false
   }
-  cleanup_policy_dry_run = true
+
+  cleanup_policy_dry_run = false
+
+  # Keep only the 5 most recent image versions. A KEEP-only policy is a
+  # no-op (KEEP just protects artifacts from DELETE policies), so the
+  # "delete-all" policy sweeps everything and "keep-last-5" exempts the
+  # newest 5 — KEEP takes precedence over DELETE. CI rolls a fresh WP
+  # revision every push to main, so the live image is always the most
+  # recent; 5 leaves roughly a 4-deploy rollback window.
+  cleanup_policies {
+    id     = "delete-all"
+    action = "DELETE"
+    condition {
+      tag_state = "ANY"
+    }
+  }
+
+  cleanup_policies {
+    id     = "keep-last-5"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = 5
+    }
+  }
 }
 
 resource "google_artifact_registry_repository_iam_member" "deployer_writer" {
