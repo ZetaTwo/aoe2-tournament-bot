@@ -29,9 +29,13 @@ Single binary crate `aoe2-tournament-bot`. Modules:
 - [src/sheets.rs](src/sheets.rs) — google-sheets4 wrapper. `ensure_tabs()`
   creates missing tabs on startup via `batchUpdate(AddSheetRequest)`.
   `append_row(tab, row)` does the per-message write.
-- [src/gcs.rs](src/gcs.rs) — google-cloud-storage wrapper (Yoshidan crate,
+- [src/gcs.rs](src/gcs.rs) — `gcloud-storage` wrapper (the Yoshidan crate,
   picked because `cloud-storage` 0.11 doesn't support the GCE metadata
-  server auth path the deployment uses).
+  server auth path the deployment uses). It was originally the
+  `google-cloud-storage` crate; that name was **donated to Google's
+  official SDK**, so the Yoshidan crate continues under the name
+  `gcloud-storage` (same API). Pin uses `jwt-rust-crypto` to keep the
+  build free of aws-lc/cmake.
 - [src/handler.rs](src/handler.rs) — serenity `EventHandler`. Handles
   `message_create` + `message_update`. Resolves the channel + category,
   matches a tournament, builds a `ResultsEntry`, parses, looks up player

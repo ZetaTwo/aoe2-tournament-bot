@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use google_cloud_storage::{
+use gcloud_storage::{
     client::{Client, ClientConfig},
     http::objects::upload::{Media, UploadObjectRequest, UploadType},
 };
