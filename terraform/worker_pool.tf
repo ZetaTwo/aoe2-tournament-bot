@@ -40,7 +40,7 @@ resource "google_cloud_run_v2_worker_pool" "bot" {
 
       env {
         name  = "RUST_LOG"
-        value = "info"
+        value = "info,serenity=warn"
       }
 
       # The mount sits outside /app so it doesn't shadow the baked-in
