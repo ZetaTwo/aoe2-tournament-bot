@@ -108,7 +108,10 @@ impl Handler {
         info!(
             id = %message.id,
             tournament = %tournament.name,
-            "processing as a results message",
+            guild = ?input.guild_id,
+            category = ?input.category,
+            channel = input.channel_name,
+            "matched results message to tournament",
         );
 
         let entry = self

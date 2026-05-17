@@ -1,4 +1,4 @@
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::config::Tournament;
 
@@ -35,15 +35,36 @@ pub fn match_tournament<'a>(
 fn tournament_matches(t: &Tournament, input: MatchInput<'_>) -> bool {
     if let Some(want_guild) = t.guild_id {
         if input.guild_id != Some(want_guild) {
+            debug!(
+                tournament = %t.name,
+                want_guild,
+                got_guild = ?input.guild_id,
+                "rejected: guild_id mismatch",
+            );
             return false;
         }
     }
     if let Some(want_cat) = t.category.as_deref() {
         if input.category != Some(want_cat) {
+            debug!(
+                tournament = %t.name,
+                want_category = want_cat,
+                got_category = ?input.category,
+                "rejected: category mismatch",
+            );
             return false;
         }
     }
-    t.channel_pattern.is_match(input.channel_name)
+    if !t.channel_pattern.is_match(input.channel_name) {
+        debug!(
+            tournament = %t.name,
+            pattern = %t.channel_pattern,
+            channel = input.channel_name,
+            "rejected: channel_pattern did not match",
+        );
+        return false;
+    }
+    true
 }
 
 #[cfg(test)]
