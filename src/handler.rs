@@ -26,6 +26,16 @@ pub struct Handler {
     pub gcs: Arc<GcsClient>,
 }
 
+/// Which gateway event delivered the message. On [`MessageEvent::Updated`],
+/// Discord guarantees the attachments are unchanged from the original post,
+/// so the files are already in GCS and must not be re-uploaded — an overwrite
+/// needs `storage.objects.delete`, which the runtime service account lacks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MessageEvent {
+    Created,
+    Updated,
+}
+
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, _ctx: Context, ready: Ready) {
@@ -34,7 +44,10 @@ impl EventHandler for Handler {
 
     async fn message(&self, ctx: Context, message: Message) {
         debug!(id = %message.id, "processing new message");
-        if let Err(e) = self.process_message(&ctx, message).await {
+        if let Err(e) = self
+            .process_message(&ctx, message, MessageEvent::Created)
+            .await
+        {
             error!("processing message failed: {e:#}");
         }
     }
@@ -57,14 +70,22 @@ impl EventHandler for Handler {
                 }
             },
         };
-        if let Err(e) = self.process_message(&ctx, message).await {
+        if let Err(e) = self
+            .process_message(&ctx, message, MessageEvent::Updated)
+            .await
+        {
             error!("processing updated message failed: {e:#}");
         }
     }
 }
 
 impl Handler {
-    async fn process_message(&self, ctx: &Context, message: Message) -> Result<()> {
+    async fn process_message(
+        &self,
+        ctx: &Context,
+        message: Message,
+        event: MessageEvent,
+    ) -> Result<()> {
         if message.author.id == ctx.cache.current_user().id {
             return Ok(());
         }
@@ -91,7 +112,14 @@ impl Handler {
         );
 
         let entry = self
-            .construct_results_entry(ctx, &message, &channel, category.as_deref(), tournament)
+            .construct_results_entry(
+                ctx,
+                &message,
+                &channel,
+                category.as_deref(),
+                tournament,
+                event,
+            )
             .await?;
 
         let now = Utc::now();
@@ -118,6 +146,7 @@ impl Handler {
         channel: &GuildChannel,
         category: Option<&str>,
         tournament: &Tournament,
+        event: MessageEvent,
     ) -> Result<ResultsEntry> {
         let jump_url = message.link();
         let poster = message
@@ -140,23 +169,37 @@ impl Handler {
 
         let mut download_links = Vec::with_capacity(message.attachments.len());
         for (idx, attachment) in message.attachments.iter().enumerate() {
-            let bytes = attachment.download().await.with_context(|| {
-                format!(
-                    "downloading attachment {} ({})",
-                    attachment.id, attachment.filename
-                )
-            })?;
             let object_name = format!(
                 "{}{}_{}",
                 tournament.gcs_prefix, attachment.id, attachment.filename
             );
-            info!(
-                "Uploading attachment {} as {} with {} bytes of data",
-                idx + 1,
-                object_name,
-                bytes.len()
-            );
-            self.gcs.upload(&object_name, bytes).await?;
+            // Discord does not allow adding or changing attachments on an
+            // existing message, so on an edit the files were already uploaded
+            // by the original `message` event. Re-uploading would overwrite the
+            // existing object, which GCS treats as a delete+create and rejects
+            // for a create-only service account. Reuse the deterministic name
+            // so the row still carries a complete replays_link.
+            if event == MessageEvent::Updated {
+                debug!(
+                    "Skipping upload of attachment {} on message edit; reusing {}",
+                    idx + 1,
+                    object_name
+                );
+            } else {
+                let bytes = attachment.download().await.with_context(|| {
+                    format!(
+                        "downloading attachment {} ({})",
+                        attachment.id, attachment.filename
+                    )
+                })?;
+                info!(
+                    "Uploading attachment {} as {} with {} bytes of data",
+                    idx + 1,
+                    object_name,
+                    bytes.len()
+                );
+                self.gcs.upload(&object_name, bytes).await?;
+            }
             download_links.push(format!("gcs://{}/{}", self.gcs.bucket(), object_name));
         }
 
