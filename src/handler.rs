@@ -60,6 +60,15 @@ impl EventHandler for Handler {
         event: MessageUpdateEvent,
     ) {
         debug!(id = %event.id, "processing updated message");
+        // Discord fires message_update for its own link/embed-preview unfurls,
+        // not just human edits. Only a real content edit sets edited_timestamp
+        // (an unfurl leaves it null), so skip everything else — otherwise the
+        // unfurl that follows almost every results post would append a
+        // duplicate row.
+        if event.edited_timestamp.is_none() {
+            debug!(id = %event.id, "skipping non-edit update (no edited_timestamp)");
+            return;
+        }
         let message = match new {
             Some(m) => m,
             None => match ctx.http.get_message(event.channel_id, event.id).await {
@@ -96,7 +105,7 @@ impl Handler {
         };
 
         let input = MatchInput {
-            guild_id: message.guild_id.map(|g| g.get()),
+            guild_id: channel.guild_id.get(),
             channel_name: channel.name.as_str(),
             category: category.as_deref(),
         };
@@ -108,7 +117,7 @@ impl Handler {
         info!(
             id = %message.id,
             tournament = %tournament.name,
-            guild = ?input.guild_id,
+            guild = input.guild_id,
             category = ?input.category,
             channel = input.channel_name,
             "matched results message to tournament",

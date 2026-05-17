@@ -4,7 +4,7 @@ use crate::config::Tournament;
 
 #[derive(Debug, Clone, Copy)]
 pub struct MatchInput<'a> {
-    pub guild_id: Option<u64>,
+    pub guild_id: u64,
     pub channel_name: &'a str,
     pub category: Option<&'a str>,
 }
@@ -23,7 +23,7 @@ pub fn match_tournament<'a>(
         let names: Vec<&str> = non_catch_all.iter().map(|t| t.name.as_str()).collect();
         warn!(
             channel = input.channel_name,
-            guild = ?input.guild_id,
+            guild = input.guild_id,
             tournaments = ?names,
             "channel matched multiple non-catch-all tournaments; using the first",
         );
@@ -34,11 +34,11 @@ pub fn match_tournament<'a>(
 
 fn tournament_matches(t: &Tournament, input: MatchInput<'_>) -> bool {
     if let Some(want_guild) = t.guild_id {
-        if input.guild_id != Some(want_guild) {
+        if input.guild_id != want_guild {
             debug!(
                 tournament = %t.name,
                 want_guild,
-                got_guild = ?input.guild_id,
+                got_guild = input.guild_id,
                 "rejected: guild_id mismatch",
             );
             return false;
@@ -94,7 +94,7 @@ mod tests {
         }
     }
 
-    fn input<'a>(guild: Option<u64>, channel: &'a str) -> MatchInput<'a> {
+    fn input<'a>(guild: u64, channel: &'a str) -> MatchInput<'a> {
         MatchInput {
             guild_id: guild,
             channel_name: channel,
@@ -102,7 +102,7 @@ mod tests {
         }
     }
 
-    fn input_cat<'a>(guild: Option<u64>, channel: &'a str, category: &'a str) -> MatchInput<'a> {
+    fn input_cat<'a>(guild: u64, channel: &'a str, category: &'a str) -> MatchInput<'a> {
         MatchInput {
             guild_id: guild,
             channel_name: channel,
@@ -116,14 +116,14 @@ mod tests {
             t("SF", Some(100), "^sf-.*-results$", false),
             t("TG", Some(100), "^tg-.*-results$", false),
         ];
-        let m = match_tournament(&tournaments, input(Some(100), "sf-final-results")).unwrap();
+        let m = match_tournament(&tournaments, input(100, "sf-final-results")).unwrap();
         assert_eq!(m.name, "SF");
     }
 
     #[test]
     fn no_match_returns_none_without_catch_all() {
         let tournaments = vec![t("SF", Some(100), "^sf-.*-results$", false)];
-        assert!(match_tournament(&tournaments, input(Some(100), "general")).is_none());
+        assert!(match_tournament(&tournaments, input(100, "general")).is_none());
     }
 
     #[test]
@@ -132,7 +132,7 @@ mod tests {
             t("SF", Some(100), "^sf-.*-results$", false),
             t("Unknown", None, "^.*results.*$", true),
         ];
-        let m = match_tournament(&tournaments, input(Some(999), "team-results")).unwrap();
+        let m = match_tournament(&tournaments, input(999, "team-results")).unwrap();
         assert_eq!(m.name, "Unknown");
     }
 
@@ -142,14 +142,14 @@ mod tests {
             t("SF", Some(100), "^sf-.*-results$", false),
             t("Unknown", None, "^.*results.*$", true),
         ];
-        let m = match_tournament(&tournaments, input(Some(100), "sf-r1-results")).unwrap();
+        let m = match_tournament(&tournaments, input(100, "sf-r1-results")).unwrap();
         assert_eq!(m.name, "SF");
     }
 
     #[test]
     fn guild_filter_excludes_wrong_guild() {
         let tournaments = vec![t("SF", Some(100), "^sf-.*-results$", false)];
-        assert!(match_tournament(&tournaments, input(Some(200), "sf-x-results")).is_none());
+        assert!(match_tournament(&tournaments, input(200, "sf-x-results")).is_none());
     }
 
     #[test]
@@ -158,14 +158,14 @@ mod tests {
             t("SF-A", Some(100), "^sf-.*$", false),
             t("SF-B", Some(100), "^sf-.*$", false),
         ];
-        let m = match_tournament(&tournaments, input(Some(100), "sf-foo")).unwrap();
+        let m = match_tournament(&tournaments, input(100, "sf-foo")).unwrap();
         assert_eq!(m.name, "SF-A");
     }
 
     #[test]
     fn non_results_channel_in_configured_guild_does_not_match() {
         let tournaments = vec![t("SF", Some(100), "^.*results.*$", false)];
-        assert!(match_tournament(&tournaments, input(Some(100), "general")).is_none());
+        assert!(match_tournament(&tournaments, input(100, "general")).is_none());
     }
 
     #[test]
@@ -179,7 +179,7 @@ mod tests {
         )];
         let m = match_tournament(
             &tournaments,
-            input_cat(Some(100), "r1-results", "Recruit SF Bracket"),
+            input_cat(100, "r1-results", "Recruit SF Bracket"),
         )
         .unwrap();
         assert_eq!(m.name, "SF");
@@ -196,7 +196,7 @@ mod tests {
         )];
         assert!(match_tournament(
             &tournaments,
-            input_cat(Some(100), "r1-results", "General SF Bracket")
+            input_cat(100, "r1-results", "General SF Bracket")
         )
         .is_none());
     }
@@ -210,7 +210,7 @@ mod tests {
             "^.*results.*$",
             false,
         )];
-        assert!(match_tournament(&tournaments, input(Some(100), "r1-results")).is_none());
+        assert!(match_tournament(&tournaments, input(100, "r1-results")).is_none());
     }
 
     #[test]
@@ -218,7 +218,7 @@ mod tests {
         let tournaments = vec![t("SF", Some(100), "^.*results.*$", false)];
         let m = match_tournament(
             &tournaments,
-            input_cat(Some(100), "r1-results", "Whatever Bracket"),
+            input_cat(100, "r1-results", "Whatever Bracket"),
         )
         .unwrap();
         assert_eq!(m.name, "SF");
