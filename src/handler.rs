@@ -132,11 +132,6 @@ impl Handler {
 
         if let Err(e) = self.sheets.append_row(&tournament.sheet_tab, row).await {
             error!("appending row failed for message {}: {e:#}", message.id);
-            let admin_msg = format!(
-                "AoE2 Tournament Bot error: failed to append results row for message {}. Please check logs",
-                message.id
-            );
-            self.notify_admins(ctx, &admin_msg).await;
         }
 
         Ok(())
@@ -213,20 +208,6 @@ impl Handler {
         }
         let _ = channel;
         Ok(entry)
-    }
-
-    async fn notify_admins(&self, ctx: &Context, body: &str) {
-        for &admin_id in &self.config.bot.admin_user_ids {
-            let user_id = UserId::new(admin_id);
-            match user_id.create_dm_channel(&ctx.http).await {
-                Ok(dm) => {
-                    if let Err(e) = dm.id.say(&ctx.http, body).await {
-                        warn!("failed to DM admin {admin_id}: {e}");
-                    }
-                }
-                Err(e) => warn!("failed to open DM channel for admin {admin_id}: {e}"),
-            }
-        }
     }
 }
 

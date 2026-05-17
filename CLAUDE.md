@@ -40,7 +40,34 @@ Single binary crate `aoe2-tournament-bot`. Modules:
   `message_create` + `message_update`. Resolves the channel + category,
   matches a tournament, builds a `ResultsEntry`, parses, looks up player
   display names, downloads attachments and uploads to GCS, appends the
-  row. On sheet-write failure, DMs every `admin_user_ids` entry.
+  row. Failures are just `error!`-logged; admins are notified by the
+  `notify` tracing layer (below), **not** by the handler directly.
+- [src/notify.rs](src/notify.rs) — `DiscordErrorLayer`, a
+  `tracing-subscriber` layer that forwards log events at/above a
+  configured `tracing::Level` (constructor param, currently `Level::ERROR`)
+  to every `admin_user_ids` entry as a Discord DM. Two non-obvious
+  invariants live here:
+  - **Init ordering** ([src/main.rs](src/main.rs)): a `tracing`
+    subscriber is global + immutable after `.init()`, and the layer needs
+    the bot token (only known post-`Config::load`). So basic tracing is
+    installed early with the layer as an inert
+    `reload::Layer::new(None::<DiscordErrorLayer>)`, then the real layer
+    is swapped in via the reload handle after config loads. **Blind
+    spot:** `error!`s between `.init()` and the `reload()` are *not*
+    DM'd. The only thing that realistically fails there is `Config::load`
+    itself, which `?`-returns to stderr via process exit — acceptable.
+    Don't "fix" this by reordering config before tracing init.
+  - **Loop-safety** (fragile): `on_event` is sync, so the async DM send
+    is `tokio::spawn`ed. It can't feed itself **only** because
+    `on_event` skips events whose target `starts_with("serenity")` (the
+    REST client's logs during the send) or `== module_path!()` (this
+    module's own logs). The spawned task logs its own failures with
+    `warn!` under the `notify` target, caught by the `module_path!()`
+    guard. Keep the send **and** its failure logging inside `notify` and
+    at a filtered level — moving the send to another module, or switching
+    its failure logging to `error!`, reintroduces an infinite DM loop.
+    Widening the level threshold is **not** automatically loop-safe;
+    re-check these target exclusions still cover every failure path.
 - [src/main.rs](src/main.rs) — wires it up. `tokio::main`. Reads
   `CONFIG_PATH` (default `./config.toml`) and `TOURNAMENTS_PATH` (default
   `./tournaments.toml`).
@@ -132,6 +159,11 @@ whatever's newest at revision-creation time.
   (`name = "SF 2026"` → tab `SF 2026`, GCS prefix `sf-2026/`).
 - The runtime service account needs **Editor** access on the spreadsheet
   (not just Viewer) for `values_append` + `batchUpdate` to work.
+- Touching error→Discord forwarding ([src/notify.rs](src/notify.rs)):
+  the loop-safety and reload-init invariants there are load-bearing and
+  easy to break silently — read that module's bullet under "Code layout"
+  before changing the send path, its failure logging, or the level
+  threshold.
 
 ## Migration state
 
