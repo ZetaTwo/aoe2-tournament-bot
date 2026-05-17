@@ -10,6 +10,7 @@ mod entry;
 mod gcs;
 mod handler;
 mod parse;
+mod retry;
 mod sheets;
 mod tournament;
 

@@ -1,9 +1,12 @@
 use anyhow::{Context, Result};
+use backon::Retryable;
 use gcloud_storage::{
     client::{Client, ClientConfig},
     http::objects::upload::{Media, UploadObjectRequest, UploadType},
 };
 use tracing::info;
+
+use crate::retry;
 
 pub struct GcsClient {
     client: Client,
@@ -31,15 +34,23 @@ impl GcsClient {
             ..Default::default()
         };
         let byte_count = bytes.len();
-        self.client
-            .upload_object(&req, bytes, &upload_type)
-            .await
-            .with_context(|| {
-                format!(
-                    "uploading object '{object_name}' to bucket '{}'",
-                    self.bucket
-                )
-            })?;
+        // `upload_object` consumes the body, so each retry attempt gets its own
+        // clone. Replays are small and this only re-clones on an actual retry.
+        (|| async {
+            self.client
+                .upload_object(&req, bytes.clone(), &upload_type)
+                .await
+        })
+        .retry(retry::backoff())
+        .when(retry::gcs_retryable)
+        .notify(retry::log_retry("gcs.upload_object"))
+        .await
+        .with_context(|| {
+            format!(
+                "uploading object '{object_name}' to bucket '{}'",
+                self.bucket
+            )
+        })?;
         info!(
             "Uploaded {byte_count} bytes to gs://{}/{}",
             self.bucket, object_name

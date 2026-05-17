@@ -7,6 +7,7 @@ description = "Discord bot that captures AoE2 tournament results into a Google S
 
 [dependencies]
 anyhow = "1"
+backon = "1"
 thiserror = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 figment = { version = "0.10", features = ["toml", "env"] }

@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use backon::Retryable;
 use google_sheets4::{
     api::{
         AddSheetRequest, BatchUpdateSpreadsheetRequest, Request, SheetProperties, Sheets,
@@ -13,6 +14,8 @@ use google_sheets4::{
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
 use tracing::info;
+
+use crate::retry;
 
 type Hub = Sheets<HttpsConnector<HttpConnector>>;
 
@@ -51,11 +54,10 @@ impl SheetsClient {
     }
 
     pub async fn list_tabs(&self) -> Result<Vec<String>> {
-        let (_, sheet) = self
-            .hub
-            .spreadsheets()
-            .get(&self.sheet_id)
-            .doit()
+        let (_, sheet) = (|| async { self.hub.spreadsheets().get(&self.sheet_id).doit().await })
+            .retry(retry::backoff())
+            .when(retry::sheets_retryable)
+            .notify(retry::log_retry("sheets.spreadsheets.get"))
             .await
             .with_context(|| format!("fetching spreadsheet metadata for {}", self.sheet_id))?;
         let title = sheet
@@ -86,47 +88,64 @@ impl SheetsClient {
         }
         info!("Creating missing sheet tab(s): {:?}", missing);
 
-        let requests = missing
-            .iter()
-            .map(|tab| Request {
-                add_sheet: Some(AddSheetRequest {
-                    properties: Some(SheetProperties {
-                        title: Some((*tab).to_string()),
-                        ..Default::default()
+        // `batch_update` consumes the request body, so it is rebuilt per
+        // attempt from the borrowed `missing` list (cheap, startup-only).
+        (|| async {
+            let requests = missing
+                .iter()
+                .map(|tab| Request {
+                    add_sheet: Some(AddSheetRequest {
+                        properties: Some(SheetProperties {
+                            title: Some((*tab).to_string()),
+                            ..Default::default()
+                        }),
                     }),
-                }),
+                    ..Default::default()
+                })
+                .collect();
+            let body = BatchUpdateSpreadsheetRequest {
+                requests: Some(requests),
                 ..Default::default()
-            })
-            .collect();
-        let body = BatchUpdateSpreadsheetRequest {
-            requests: Some(requests),
-            ..Default::default()
-        };
-        self.hub
-            .spreadsheets()
-            .batch_update(body, &self.sheet_id)
-            .doit()
-            .await
-            .with_context(|| format!("creating sheet tabs {:?}", missing))?;
+            };
+            self.hub
+                .spreadsheets()
+                .batch_update(body, &self.sheet_id)
+                .doit()
+                .await
+        })
+        .retry(retry::backoff())
+        .when(retry::sheets_retryable)
+        .notify(retry::log_retry("sheets.spreadsheets.batch_update"))
+        .await
+        .with_context(|| format!("creating sheet tabs {:?}", missing))?;
         Ok(())
     }
 
     pub async fn append_row(&self, tab: &str, row: Vec<String>) -> Result<()> {
         let values: Vec<serde_json::Value> =
             row.into_iter().map(serde_json::Value::String).collect();
-        let req = ValueRange {
-            values: Some(vec![values]),
-            ..Default::default()
-        };
         let range = format!("{tab}!A1");
-        let (_, response) = self
-            .hub
-            .spreadsheets()
-            .values_append(req, &self.sheet_id, &range)
-            .value_input_option("RAW")
-            .doit()
-            .await
-            .with_context(|| format!("appending row to sheet tab '{tab}'"))?;
+        // `values_append` consumes the `ValueRange`, so it is rebuilt per
+        // attempt by cloning the row payload. Note: values.append is not
+        // idempotent — a retry after a lost 503 response can duplicate the
+        // row; accepted (rare, visible) over silently losing a result.
+        let (_, response) = (|| async {
+            let req = ValueRange {
+                values: Some(vec![values.clone()]),
+                ..Default::default()
+            };
+            self.hub
+                .spreadsheets()
+                .values_append(req, &self.sheet_id, &range)
+                .value_input_option("RAW")
+                .doit()
+                .await
+        })
+        .retry(retry::backoff())
+        .when(retry::sheets_retryable)
+        .notify(retry::log_retry("sheets.values_append"))
+        .await
+        .with_context(|| format!("appending row to sheet tab '{tab}'"))?;
         let updated_rows = response
             .updates
             .as_ref()
