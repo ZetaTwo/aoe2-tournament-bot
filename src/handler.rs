@@ -75,10 +75,7 @@ impl EventHandler for Handler {
             None => match ctx.http.get_message(event.channel_id, event.id).await {
                 Ok(m) => m,
                 Err(e) => {
-                    log_serenity_failure(
-                        &format!("fetching updated message {}", event.id),
-                        &e,
-                    );
+                    log_serenity_failure(&format!("fetching updated message {}", event.id), &e);
                     return;
                 }
             },
