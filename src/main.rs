@@ -6,6 +6,7 @@ use tracing::{info, warn, Level};
 use tracing_subscriber::{fmt, prelude::*, registry, reload, EnvFilter};
 
 mod config;
+mod diag;
 mod entry;
 mod gcs;
 mod handler;

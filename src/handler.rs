@@ -13,6 +13,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     config::{Config, Tournament},
+    diag::{log_processing_failure, log_serenity_failure},
     entry::ResultsEntry,
     gcs::GcsClient,
     parse::parse_message_content,
@@ -48,7 +49,7 @@ impl EventHandler for Handler {
             .process_message(&ctx, message, MessageEvent::Created)
             .await
         {
-            error!("processing message failed: {e:#}");
+            log_processing_failure("processing message failed", &e);
         }
     }
 
@@ -74,7 +75,10 @@ impl EventHandler for Handler {
             None => match ctx.http.get_message(event.channel_id, event.id).await {
                 Ok(m) => m,
                 Err(e) => {
-                    error!("fetching updated message {}: {e}", event.id);
+                    log_serenity_failure(
+                        &format!("fetching updated message {}", event.id),
+                        &e,
+                    );
                     return;
                 }
             },
@@ -83,7 +87,7 @@ impl EventHandler for Handler {
             .process_message(&ctx, message, MessageEvent::Updated)
             .await
         {
-            error!("processing updated message failed: {e:#}");
+            log_processing_failure("processing updated message failed", &e);
         }
     }
 }
