@@ -18,7 +18,8 @@ Single binary crate `aoe2-tournament-bot`. Modules:
 - [src/config.rs](src/config.rs) — figment-loaded TOML config. **Splits
   across two files** (see "Configuration" below). `Tournament` is the
   validated form; `RawTournament` is what TOML deserializes into.
-  `kebab_case_prefix()` derives GCS prefixes from tournament names.
+  `validate_id()` checks each tournament's explicit `id` field (kebab-case)
+  and turns it into the GCS prefix.
 - [src/tournament.rs](src/tournament.rs) — `match_tournament(input)`
   picks which tournament an incoming message belongs to. Walks the config
   list in order; first match wins; warns on overlapping non-catch-all
@@ -154,9 +155,9 @@ whatever's newest at revision-creation time.
 - Tournament-config changes need an **image rebuild** to take effect; only
   config-secret changes can be rolled with `gcloud secrets versions add`
   + WP revision.
-- `tournaments.toml` entries' `name` doubles as the Sheet tab name (created
-  on startup if missing) and as the kebab-cased GCS prefix
-  (`name = "SF 2026"` → tab `SF 2026`, GCS prefix `sf-2026/`).
+- `tournaments.toml` entries' `name` is the Sheet tab name (created on
+  startup if missing); `id` is the explicit, separately-set GCS prefix
+  (`id = "sf-2026"` → GCS prefix `sf-2026/`).
 - The runtime service account needs **Editor** access on the spreadsheet
   (not just Viewer) for `values_append` + `batchUpdate` to work.
 - Touching error→Discord forwarding ([src/notify.rs](src/notify.rs)):

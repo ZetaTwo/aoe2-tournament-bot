@@ -7,34 +7,48 @@
 # is the only place where `guild_id` can be omitted; it catches anything not
 # claimed by a more specific tournament.
 #
-# `name` is used as the Google Sheet tab; the GCS object-key prefix is the
-# kebab-cased name plus "/".
+# `name` is used as the Google Sheet tab. `id` is the GCS object-key prefix
+# (plus "/") and must be lowercase ASCII alphanumeric with single-hyphen
+# separators (e.g. "sf-2026"). Changing `id` on an existing tournament does
+# not move already-uploaded replays: new uploads land under the new prefix
+# while old ones stay under the old one, so treat it as stable once set.
+
+[[tournaments]]
+name = "T90 Community Cup: 3rd edition"
+id = "tcc3"
+guild_id = 1204891027094241380
+channel_pattern = "^.*-results$"
 
 [[tournaments]]
 name = "Spec 2: Continental"
+id = "spec-2-continental"
 guild_id = 724280954017022013
 category = "Continental"
 channel_pattern = "^.*-results$"
 
 [[tournaments]]
 name = "Spec 2: Stronghold"
+id = "spec-2-stronghold"
 guild_id = 724280954017022013
 category = "Stronghold"
 channel_pattern = "^.*-results$"
 
 [[tournaments]]
 name = "Spec 2: Thalassocracy"
+id = "spec-2-thalassocracy"
 guild_id = 724280954017022013
 category = "Thalassocracy"
 channel_pattern = "^.*-results$"
 
 [[tournaments]]
 name = "Spec 2: Nomad"
+id = "spec-2-nomad"
 guild_id = 724280954017022013
 category = "Nomad"
 channel_pattern = "^.*-results$"
 
 [[tournaments]]
 name = "Unknown"
+id = "unknown"
 catch_all = true
 channel_pattern = "^(results.*|.*results)$"

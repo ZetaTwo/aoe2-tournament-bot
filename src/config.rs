@@ -31,6 +31,7 @@ pub struct GcpConfig {
 #[derive(Debug, Deserialize)]
 struct RawTournament {
     name: String,
+    id: String,
     guild_id: Option<u64>,
     category: Option<String>,
     channel_pattern: String,
@@ -94,10 +95,10 @@ fn validate(raw: RawConfig) -> Result<Config> {
                 t.name, t.channel_pattern
             )
         })?;
-        let gcs_prefix = kebab_case_prefix(&t.name).ok_or_else(|| {
+        let gcs_prefix = validate_id(&t.id).ok_or_else(|| {
             anyhow!(
-                "tournament name '{}' has no ASCII alphanumeric characters; cannot derive gcs_prefix",
-                t.name
+                "tournament '{}' has invalid id '{}': must be non-empty, lowercase ASCII alphanumeric with single hyphen separators (e.g. 'sf-2026')",
+                t.name, t.id
             )
         })?;
         tournaments.push(Tournament {
@@ -121,10 +122,10 @@ fn validate(raw: RawConfig) -> Result<Config> {
             }
             if tournaments[i].gcs_prefix == tournaments[j].gcs_prefix {
                 return Err(anyhow!(
-                    "tournaments '{}' and '{}' share derived gcs_prefix '{}'",
+                    "tournaments '{}' and '{}' share id '{}'",
                     tournaments[i].name,
                     tournaments[j].name,
-                    tournaments[i].gcs_prefix
+                    &tournaments[i].gcs_prefix[..tournaments[i].gcs_prefix.len() - 1]
                 ));
             }
         }
@@ -145,28 +146,15 @@ fn validate(raw: RawConfig) -> Result<Config> {
     })
 }
 
-pub fn kebab_case_prefix(name: &str) -> Option<String> {
-    let mut out = String::with_capacity(name.len() + 1);
-    let mut last_was_dash = true;
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() {
-            for lower in ch.to_lowercase() {
-                out.push(lower);
-            }
-            last_was_dash = false;
-        } else if !last_was_dash {
-            out.push('-');
-            last_was_dash = true;
-        }
-    }
-    while out.ends_with('-') {
-        out.pop();
-    }
-    if out.is_empty() {
-        return None;
-    }
-    out.push('/');
-    Some(out)
+fn validate_id(id: &str) -> Option<String> {
+    let valid = !id.is_empty()
+        && !id.starts_with('-')
+        && !id.ends_with('-')
+        && !id.contains("--")
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    valid.then(|| format!("{id}/"))
 }
 
 #[cfg(test)]
@@ -178,16 +166,14 @@ mod tests {
     }
 
     #[test]
-    fn kebab_case_examples() {
-        assert_eq!(kebab_case_prefix("SF 2026").as_deref(), Some("sf-2026/"));
-        assert_eq!(
-            kebab_case_prefix("  General SF  ").as_deref(),
-            Some("general-sf/")
-        );
-        assert_eq!(kebab_case_prefix("Foo/Bar").as_deref(), Some("foo-bar/"));
-        assert_eq!(kebab_case_prefix("--A--B--").as_deref(), Some("a-b/"));
-        assert_eq!(kebab_case_prefix("!!!"), None);
-        assert_eq!(kebab_case_prefix(""), None);
+    fn validate_id_examples() {
+        assert_eq!(validate_id("sf-2026").as_deref(), Some("sf-2026/"));
+        assert_eq!(validate_id("general-sf").as_deref(), Some("general-sf/"));
+        assert_eq!(validate_id("SF 2026"), None);
+        assert_eq!(validate_id("-a-b"), None);
+        assert_eq!(validate_id("a-b-"), None);
+        assert_eq!(validate_id("a--b"), None);
+        assert_eq!(validate_id(""), None);
     }
 
     #[test]
@@ -204,11 +190,13 @@ sheet_id = "s"
 
 [[tournaments]]
 name = "SF 2026"
+id = "sf-2026"
 guild_id = 100
 channel_pattern = "^sf-.*-results$"
 
 [[tournaments]]
 name = "Unknown"
+id = "unknown"
 catch_all = true
 channel_pattern = ".*"
 "#,
@@ -250,6 +238,7 @@ bucket = "b"
 sheet_id = "s"
 [[tournaments]]
 name = "A"
+id = "a"
 channel_pattern = "["
 "#,
         );
@@ -268,9 +257,11 @@ bucket = "b"
 sheet_id = "s"
 [[tournaments]]
 name = "A"
+id = "a"
 channel_pattern = ".*"
 [[tournaments]]
 name = "A"
+id = "a2"
 channel_pattern = ".*"
 "#,
         );
@@ -279,7 +270,7 @@ channel_pattern = ".*"
     }
 
     #[test]
-    fn rejects_duplicate_derived_prefix() {
+    fn rejects_duplicate_ids() {
         let raw = raw_from_toml(
             r#"
 [bot]
@@ -290,14 +281,16 @@ bucket = "b"
 sheet_id = "s"
 [[tournaments]]
 name = "SF 2026"
+id = "sf-2026"
 channel_pattern = ".*"
 [[tournaments]]
-name = "sf-2026"
+name = "SF 2026 Redux"
+id = "sf-2026"
 channel_pattern = ".*"
 "#,
         );
         let err = validate(raw).unwrap_err().to_string();
-        assert!(err.contains("gcs_prefix"), "{err}");
+        assert!(err.contains("share id"), "{err}");
     }
 
     #[test]
@@ -312,10 +305,12 @@ bucket = "b"
 sheet_id = "s"
 [[tournaments]]
 name = "A"
+id = "a"
 catch_all = true
 channel_pattern = ".*"
 [[tournaments]]
 name = "B"
+id = "b"
 channel_pattern = ".*"
 "#,
         );
@@ -324,7 +319,7 @@ channel_pattern = ".*"
     }
 
     #[test]
-    fn rejects_name_with_no_alphanumerics() {
+    fn rejects_invalid_id() {
         let raw = raw_from_toml(
             r#"
 [bot]
@@ -334,10 +329,12 @@ admin_user_ids = [1]
 bucket = "b"
 sheet_id = "s"
 [[tournaments]]
-name = "!!!"
+name = "A"
+id = "Not Kebab"
 channel_pattern = ".*"
 "#,
         );
-        assert!(validate(raw).is_err());
+        let err = validate(raw).unwrap_err().to_string();
+        assert!(err.contains("invalid id"), "{err}");
     }
 }
