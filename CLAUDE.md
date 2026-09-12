@@ -86,9 +86,9 @@ Two files, merged via figment at startup. **Don't conflate them.**
   Secret Manager as `aoe2-tournament-bot-config`. See
   [config.example.toml](config.example.toml).
 
-Rotating a Discord token = `gcloud secrets versions add ...` then roll a
-new Worker Pool revision. Adding a tournament = edit `tournaments.toml`,
-commit, push.
+Rotating a Discord token = update `config.toml` in the `infrastructure`
+repo's vault, `make ansible-apply` there. Adding a tournament = edit
+`tournaments.toml`, commit, push.
 
 ## Sheet columns
 
@@ -105,40 +105,50 @@ default and is recorded in this column regardless).
 
 ## Deployment
 
-- **Runtime**: Cloud Run Worker Pool `aoe2-tournament-bot` in
-  `europe-north1`, GCP project `aoe2-tournaments`, runs as the existing
-  service account `tournament-bot@aoe2-tournaments.iam.gserviceaccount.com`.
-- **Scaling**: `MANUAL` with `manual_instance_count = 1`. Discord
-  gateway is a single persistent WebSocket; autoscale would idle this to
-  zero.
+- **Runtime**: a single-replica Kubernetes `Deployment` on a self-hosted
+  k3s cluster (see the sibling `infrastructure` repo), namespace
+  `aoe2-tournament-bot`. Runs with `GOOGLE_APPLICATION_CREDENTIALS`
+  pointing at a downloaded key for the existing service account
+  `tournament-bot@aoe2-tournaments.iam.gserviceaccount.com`, since bare
+  k3s has no equivalent to Cloud Run's keyless attached-SA auth.
+- **Scaling**: `replicas: 1`, no HPA. Discord gateway is a single
+  persistent WebSocket; autoscaling would fight that.
 - **Image source**: GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml))
-  builds + pushes to Artifact Registry on push to `main`, then runs
-  `gcloud run worker-pools update --image=...` to roll a revision.
-- **Auth (GitHub → GCP)**: Workload Identity Federation. Two repo
-  *variables* (not secrets): `WIF_PROVIDER`, `DEPLOYER_SA`. Output by
-  Terraform.
-- **Infra-as-code**: [terraform/](terraform/). One-time `terraform
-  apply` brings up everything except: the TF state bucket itself
-  (chicken-and-egg), the real secret payload (out-of-band), and the
-  image (CI owns it — `ignore_changes` on `template[0].containers[0].image`).
+  builds + pushes to `ghcr.io/zetatwo/aoe2-tournament-bot` on push to
+  `main`, then checks out `infrastructure`, bumps the image tag in
+  `k8s/aoe2-tournament-bot/deployment.yaml`, commits, and pushes. Flux CD
+  (running in the cluster) picks up that commit and reconciles — no
+  `kubectl`/deploy step run by CI itself.
+- **Auth (GitHub → registry / infra repo)**: GHCR push uses the default
+  `GITHUB_TOKEN`; the commit-back uses a fine-grained PAT
+  (`INFRA_REPO_PAT` repo secret, scoped to `Contents: Read and write` on
+  `infrastructure` only).
+- **Infra-as-code**: this repo's [terraform/](terraform/) now only
+  references the runtime SA and the replay bucket (`data` blocks, nothing
+  managed). The actual Kubernetes manifests and secret-provisioning
+  Ansible role live in the `infrastructure` repo:
+  `k8s/aoe2-tournament-bot/` and `ansible/roles/aoe2_tournament_bot/`.
 
 ### Mount paths inside the container (important)
 
 - `/app/tournaments.toml` — baked in by the Dockerfile.
-- `/etc/aoe2-tournament-bot/config.toml` — secret volume mount. Bot finds
-  it via `CONFIG_PATH=/etc/aoe2-tournament-bot/config.toml` (env set on
-  the Worker Pool container).
+- `/etc/aoe2-tournament-bot/config.toml` and
+  `/etc/aoe2-tournament-bot/service-account.json` — Kubernetes Secret
+  volume mount (`aoe2-tournament-bot-secrets`). Bot finds the config via
+  `CONFIG_PATH=/etc/aoe2-tournament-bot/config.toml`.
 - The mount path is **deliberately not `/app/`** — a directory-level
   volume mount would shadow the baked-in `tournaments.toml`.
 
 ### Secret bootstrapping
 
-Cloud Run validates at create time that the secret version referenced
-by a volume mount exists. Terraform therefore creates a *placeholder* v1
-of `aoe2-tournament-bot-config` (see [terraform/secret.tf](terraform/secret.tf))
-with `lifecycle.ignore_changes = [secret_data]`. The real config is
-added as v2+ out-of-band; `latest` in the WP volume mount resolves to
-whatever's newest at revision-creation time.
+`config.toml` and the SA key are `ansible-vault`-encrypted files in
+`infrastructure`'s `ansible/roles/aoe2_tournament_bot/files/`. That role's
+tasks read them via `lookup('file', ...)` (which transparently decrypts
+vault content) straight into a `kubernetes.core.k8s` Secret definition —
+nothing is ever written to disk on the node. The role also ensures the
+`aoe2-tournament-bot` namespace exists, idempotently, since Flux creating
+the same namespace from `k8s/aoe2-tournament-bot/namespace.yaml` isn't
+guaranteed to run first.
 
 ## CI conventions
 
@@ -149,12 +159,9 @@ whatever's newest at revision-creation time.
 
 ## Common gotchas
 
-- `google_cloud_run_v2_worker_pool` defaults `deletion_protection = true`;
-  the resource explicitly sets it to `false` so plan-driven replacements
-  work without manual intervention.
-- Tournament-config changes need an **image rebuild** to take effect; only
-  config-secret changes can be rolled with `gcloud secrets versions add`
-  + WP revision.
+- Tournament-config changes need an **image rebuild** to take effect;
+  only `config.toml` changes can be rolled without one (update the vault
+  file in `infrastructure`, `make ansible-apply`).
 - `tournaments.toml` entries' `name` is the Sheet tab name (created on
   startup if missing); `id` is the explicit, separately-set GCS prefix
   (`id = "sf-2026"` → GCS prefix `sf-2026/`).
@@ -165,10 +172,3 @@ whatever's newest at revision-creation time.
   easy to break silently — read that module's bullet under "Code layout"
   before changing the send path, its failure logging, or the level
   threshold.
-
-## Migration state
-
-The Rust port is on `main`. Live infrastructure is mid-migration from
-the previous GCE COS VM (`aoe2-tournament-bot` in `europe-north1-b`) to
-the Cloud Run Worker Pool. [MIGRATION.md](MIGRATION.md) tracks the
-remaining cutover steps; delete that file once the GCE VM is gone.

@@ -29,9 +29,11 @@ Configuration is split across two TOML files that are merged at startup:
   push-to-`main` (which CI builds + deploys). Default path
   `./tournaments.toml`, overridable via `TOURNAMENTS_PATH`.
 - `config.toml` — Discord token, admin IDs, GCP bucket/sheet ID. Never
-  committed; stored in Secret Manager (`aoe2-tournament-bot-config`) in
-  production. Default path `./config.toml`, overridable via `CONFIG_PATH`.
-  See [config.example.toml](config.example.toml) for the schema.
+  committed; `ansible-vault`-encrypted in the sibling `infrastructure`
+  repo's `ansible/roles/aoe2_tournament_bot/files/config.toml` and applied
+  as a Kubernetes Secret in production. Default path `./config.toml`,
+  overridable via `CONFIG_PATH`. See [config.example.toml](config.example.toml)
+  for the schema.
 
 Log level is controlled by `RUST_LOG` (e.g. `info`, `debug,serenity=warn`).
 
@@ -84,36 +86,43 @@ GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json \
 
 ## Deployment
 
-The bot is built and rolled forward by [.github/workflows/ci.yml](.github/workflows/ci.yml)
-on every push to `main`. It runs as a Cloud Run Worker Pool
-(`aoe2-tournament-bot` in `europe-north1`) under the GCP project
-`aoe2-tournaments`.
+The bot runs as a single-replica Kubernetes `Deployment` on a self-hosted
+k3s cluster, managed via GitOps in the sibling `infrastructure` repo (Flux
+CD watches that repo's `k8s/` tree and reconciles it). No Service or
+Ingress — it's not a web app, just a background worker holding a
+persistent Discord gateway connection (`replicas: 1`, never autoscaled).
 
 - **Code path**: push to `main` → `cargo test` job runs → on success, the
-  `deploy` job builds the image, pushes it tagged `:<sha>` and `:latest` to
-  Artifact Registry, then `gcloud run worker-pools update`s the pool.
-- **Auth from GitHub to GCP**: Workload Identity Federation. No JSON keys.
-  Repo variables `WIF_PROVIDER` and `DEPLOYER_SA` are output by Terraform
-  (see below) and set with `gh variable set`.
-- **Config / secrets**: `config.toml` lives in Secret Manager as
-  `aoe2-tournament-bot-config` and is mounted at
-  `/etc/aoe2-tournament-bot/config.toml` in the Worker Pool (the bot finds
-  it via `CONFIG_PATH`). Rotating the Discord token =
-  `gcloud secrets versions add ...` followed by
-  `gcloud run worker-pools update aoe2-tournament-bot --region=europe-north1`
-  to roll the revision. `tournaments.toml` is *not* in the secret — it's
-  baked into the image, so a routing change is a `git push` to `main`.
-- **Infrastructure-as-code**: everything one-time (WIF, the deployer SA,
-  the Artifact Registry repo, the config secret, the Worker Pool itself)
-  is described in [terraform/](terraform/). See [terraform/README.md](terraform/README.md)
-  for the bootstrap order.
+  `deploy` job builds the image, pushes it to
+  `ghcr.io/zetatwo/aoe2-tournament-bot` tagged `:<sha>`, then bumps that
+  tag in `infrastructure`'s `k8s/aoe2-tournament-bot/deployment.yaml` and
+  pushes — Flux reconciles the new image within about a minute.
+- **Auth from GitHub to registry / infra repo**: GHCR push uses the
+  default `GITHUB_TOKEN`; the commit-back to `infrastructure` uses a
+  fine-grained PAT (`INFRA_REPO_PAT` repo secret, scoped to
+  `Contents: Read and write` on that one repo).
+- **Config / secrets**: `config.toml` is `ansible-vault`-encrypted at
+  `infrastructure`'s `ansible/roles/aoe2_tournament_bot/files/config.toml`
+  and applied as a Kubernetes `Secret`, mounted at
+  `/etc/aoe2-tournament-bot/config.toml` (the bot finds it via
+  `CONFIG_PATH`). Rotating the Discord token means updating that file and
+  running `make ansible-apply` in `infrastructure`. `tournaments.toml` is
+  *not* a secret — it's baked into the image, so a routing change is still
+  just a `git push` to `main`.
+- **Infrastructure-as-code**: the Kubernetes manifests live in
+  `infrastructure`'s `k8s/aoe2-tournament-bot/`; the Ansible role
+  provisioning the namespace + secret is
+  `ansible/roles/aoe2_tournament_bot/`. This repo's own
+  [terraform/](terraform/) only keeps a reference to the runtime service
+  account and the GCS replay bucket — see [terraform/README.md](terraform/README.md).
 
 ### Bot runtime service account
 
-`tournament-bot@aoe2-tournaments.iam.gserviceaccount.com` (predates this
-repo). The Terraform module grants it `roles/secretmanager.secretAccessor`
-on the config secret; its existing Sheets API and `aoe2-tournament-replays`
-GCS bucket permissions carry over.
+`tournament-bot@aoe2-tournaments.iam.gserviceaccount.com`. The pod
+authenticates to the Sheets and GCS APIs with a downloaded key from this
+SA (`GOOGLE_APPLICATION_CREDENTIALS`), mounted the same way as
+`config.toml`. Its Sheets API and `aoe2-tournament-replays` GCS bucket
+permissions are unchanged.
 
 ### Useful links
 
@@ -126,15 +135,4 @@ GCS bucket permissions carry over.
 gcloud auth application-default login \
     --impersonate-service-account tournament-bot@aoe2-tournaments.iam.gserviceaccount.com
 cargo run --release
-```
-
-### Retiring the old GCE VM
-
-The previous deployment was a Container-Optimized OS GCE VM
-(`aoe2-tournament-bot` in `europe-north1-b`) updated via
-`gcloud compute instances update-container`. Once the Worker Pool has been
-verified end-to-end, retire it manually:
-
-```sh
-gcloud compute instances delete aoe2-tournament-bot --zone=europe-north1-b
 ```
