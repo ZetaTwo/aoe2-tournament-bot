@@ -3,18 +3,16 @@
 Discord bot (Rust, [serenity](https://github.com/serenity-rs/serenity)) that
 watches "results" channels in AoE2 tournament servers, parses match
 reports, uploads attachments to GCS, and appends a row to a Google Sheet.
-Ports from a Python implementation (now deleted; see the `Started Rust
-port` commit for the cut-over).
 
 ## Code layout
 
 Single binary crate `aoe2-tournament-bot`. Modules:
 
 - [src/parse.rs](src/parse.rs) — regex parsing of result messages. Pure,
-  unit-tested. The three Python tests are ported verbatim (`TEST_MESSAGE1/2/3`).
+  unit-tested (`TEST_MESSAGE1/2/3` cover the supported formats).
 - [src/entry.rs](src/entry.rs) — `ResultsEntry` struct + `get_row()` that
-  must produce the 14-column row in [the exact order the Python bot used](src/entry.rs#L34-L49)
-  (`Vec<String>`).
+  must produce the 14-column row in [this exact, fixed order](src/entry.rs#L34-L49)
+  (`Vec<String>`) — existing sheet readers depend on it.
 - [src/config.rs](src/config.rs) — figment-loaded TOML config. **Splits
   across two files** (see "Configuration" below). `Tournament` is the
   validated form; `RawTournament` is what TOML deserializes into.
@@ -30,12 +28,11 @@ Single binary crate `aoe2-tournament-bot`. Modules:
 - [src/sheets.rs](src/sheets.rs) — google-sheets4 wrapper. `ensure_tabs()`
   creates missing tabs on startup via `batchUpdate(AddSheetRequest)`.
   `append_row(tab, row)` does the per-message write.
-- [src/gcs.rs](src/gcs.rs) — `gcloud-storage` wrapper (the Yoshidan crate,
-  picked because `cloud-storage` 0.11 doesn't support the GCE metadata
-  server auth path the deployment uses). It was originally the
-  `google-cloud-storage` crate; that name was **donated to Google's
-  official SDK**, so the Yoshidan crate continues under the name
-  `gcloud-storage` (same API). Pin uses `jwt-rust-crypto` to keep the
+- [src/gcs.rs](src/gcs.rs) — `gcloud-storage` wrapper (the Yoshidan crate;
+  note this differs from the `google-cloud-storage` name on crates.io).
+  Picked because `cloud-storage` 0.11 doesn't support the ADC auth path
+  the deployment uses: a downloaded service-account key via
+  `GOOGLE_APPLICATION_CREDENTIALS`. Pin uses `jwt-rust-crypto` to keep the
   build free of aws-lc/cmake.
 - [src/handler.rs](src/handler.rs) — serenity `EventHandler`. Handles
   `message_create` + `message_update`. Resolves the channel + category,
@@ -82,9 +79,9 @@ Two files, merged via figment at startup. **Don't conflate them.**
   push to `main` so CI builds a new image. See [tournaments.toml](tournaments.toml)
   for the live routing.
 - **`config.toml`** — gitignored. Holds `[bot]` (Discord token, admin
-  IDs) and `[gcp]` (bucket, sheet ID). In production this lives in
-  Secret Manager as `aoe2-tournament-bot-config`. See
-  [config.example.toml](config.example.toml).
+  IDs) and `[gcp]` (bucket, sheet ID). In production this is
+  `ansible-vault`-encrypted in the `infrastructure` repo and applied as a
+  Kubernetes Secret. See [config.example.toml](config.example.toml).
 
 Rotating a Discord token = update `config.toml` in the `infrastructure`
 repo's vault, `make ansible-apply` there. Adding a tournament = edit
@@ -92,8 +89,8 @@ repo's vault, `make ansible-apply` there. Adding a tournament = edit
 
 ## Sheet columns
 
-Row layout matches the Python bot's (don't change without coordinating with
-existing sheet readers). Order:
+Row layout is fixed — don't change without coordinating with existing
+sheet readers. Order:
 
 `timestamp, message_link, poster, bracket, p1_id, p1_name, p1_score,
 p2_id, p2_name, p2_score, map_draft, civ_draft, replays_link,

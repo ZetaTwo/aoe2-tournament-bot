@@ -37,8 +37,8 @@ WORKDIR /app
 # Tournament routing is checked into git and baked into the image.
 COPY tournaments.toml ./tournaments.toml
 # Secrets/per-env config (config.toml) is provided at runtime — locally as a
-# bind mount, in production from Secret Manager. The Worker Pool sets
-# CONFIG_PATH to the mounted location; for local runs the default
-# ./config.toml works.
+# bind mount, in production via a Kubernetes Secret volume mount. CONFIG_PATH
+# points at the mounted location; for local runs the default ./config.toml
+# works.
 ENV RUST_LOG=info
 CMD ["/usr/local/bin/aoe2-tournament-bot"]

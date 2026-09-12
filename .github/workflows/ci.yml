@@ -68,9 +68,8 @@ jobs:
           # for the infrastructure-repo commit below, so no floating :latest.
           tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           # The `buildcache` tag keeps the cargo-chef dependency layer across
-          # CI runs; GHCR has no separate cleanup-policy exclusion like the
-          # old Artifact Registry setup, so prune old buildcache manually if
-          # storage ever becomes a concern.
+          # CI runs; GHCR has no automatic cleanup policy excluding it, so
+          # prune old buildcache manually if storage ever becomes a concern.
           cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
 

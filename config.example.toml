@@ -1,6 +1,7 @@
 # Secrets and per-environment knobs. Copy to config.toml and fill in.
-# The file ends up in Secret Manager (`aoe2-tournament-bot-config`) in
-# production; locally the bot reads it from CONFIG_PATH (default ./config.toml).
+# In production this file is ansible-vault-encrypted in the sibling
+# infrastructure repo and applied as a Kubernetes Secret; locally the bot
+# reads it from CONFIG_PATH (default ./config.toml).
 #
 # Tournament-to-channel routing lives in tournaments.toml — it's checked
 # into git and baked into the image. Tracing log level is set via RUST_LOG.
