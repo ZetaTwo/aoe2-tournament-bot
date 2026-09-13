@@ -38,37 +38,16 @@ Single binary crate `aoe2-tournament-bot`. Modules:
   `message_create` + `message_update`. Resolves the channel + category,
   matches a tournament, builds a `ResultsEntry`, parses, looks up player
   display names, downloads attachments and uploads to GCS, appends the
-  row. Failures are just `error!`-logged; admins are notified by the
-  `notify` tracing layer (below), **not** by the handler directly.
-- [src/notify.rs](src/notify.rs) — `DiscordErrorLayer`, a
-  `tracing-subscriber` layer that forwards log events at/above a
-  configured `tracing::Level` (constructor param, currently `Level::ERROR`)
-  to every `admin_user_ids` entry as a Discord DM. Two non-obvious
-  invariants live here:
-  - **Init ordering** ([src/main.rs](src/main.rs)): a `tracing`
-    subscriber is global + immutable after `.init()`, and the layer needs
-    the bot token (only known post-`Config::load`). So basic tracing is
-    installed early with the layer as an inert
-    `reload::Layer::new(None::<DiscordErrorLayer>)`, then the real layer
-    is swapped in via the reload handle after config loads. **Blind
-    spot:** `error!`s between `.init()` and the `reload()` are *not*
-    DM'd. The only thing that realistically fails there is `Config::load`
-    itself, which `?`-returns to stderr via process exit — acceptable.
-    Don't "fix" this by reordering config before tracing init.
-  - **Loop-safety** (fragile): `on_event` is sync, so the async DM send
-    is `tokio::spawn`ed. It can't feed itself **only** because
-    `on_event` skips events whose target `starts_with("serenity")` (the
-    REST client's logs during the send) or `== module_path!()` (this
-    module's own logs). The spawned task logs its own failures with
-    `warn!` under the `notify` target, caught by the `module_path!()`
-    guard. Keep the send **and** its failure logging inside `notify` and
-    at a filtered level — moving the send to another module, or switching
-    its failure logging to `error!`, reintroduces an infinite DM loop.
-    Widening the level threshold is **not** automatically loop-safe;
-    re-check these target exclusions still cover every failure path.
+  row. Failures are just `error!`-logged.
 - [src/main.rs](src/main.rs) — wires it up. `tokio::main`. Reads
   `CONFIG_PATH` (default `./config.toml`) and `TOURNAMENTS_PATH` (default
-  `./tournaments.toml`).
+  `./tournaments.toml`). Installs a `tracing-subscriber` registry once, at
+  startup, emitting structured JSON to stdout (`fmt::layer().json()`).
+  There is no Discord-based alerting in-process anymore — the infra
+  layer is expected to tail stdout and alert on `level=ERROR` records.
+  Because there's no dependency on config (unlike the old Discord layer,
+  which needed the bot token), init happens before `Config::load` and
+  stays a single step — no `reload` layer needed.
 
 ## Configuration
 
@@ -78,8 +57,8 @@ Two files, merged via figment at startup. **Don't conflate them.**
   image**. Holds the `[[tournaments]]` list. Editing it requires a
   push to `main` so CI builds a new image. See [tournaments.toml](tournaments.toml)
   for the live routing.
-- **`config.toml`** — gitignored. Holds `[bot]` (Discord token, admin
-  IDs) and `[gcp]` (bucket, sheet ID). In production this is
+- **`config.toml`** — gitignored. Holds `[bot]` (Discord token) and
+  `[gcp]` (bucket, sheet ID). In production this is
   `ansible-vault`-encrypted in the `infrastructure` repo and applied as a
   Kubernetes Secret. See [config.example.toml](config.example.toml).
 
@@ -164,8 +143,7 @@ guaranteed to run first.
   (`id = "sf-2026"` → GCS prefix `sf-2026/`).
 - The runtime service account needs **Editor** access on the spreadsheet
   (not just Viewer) for `values_append` + `batchUpdate` to work.
-- Touching error→Discord forwarding ([src/notify.rs](src/notify.rs)):
-  the loop-safety and reload-init invariants there are load-bearing and
-  easy to break silently — read that module's bullet under "Code layout"
-  before changing the send path, its failure logging, or the level
-  threshold.
+- Alerting is out-of-process: the bot only writes structured JSON logs to
+  stdout ([src/main.rs](src/main.rs)). There is no in-app Discord DM path
+  anymore — whatever watches the pod's logs (e.g. a log-based alert rule
+  in `infrastructure`) owns notifying humans on `level=ERROR`.

@@ -19,7 +19,6 @@ struct RawConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct BotConfig {
     pub discord_token: String,
-    pub admin_user_ids: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -76,10 +75,6 @@ impl Config {
 }
 
 fn validate(raw: RawConfig) -> Result<Config> {
-    if raw.bot.admin_user_ids.is_empty() {
-        return Err(anyhow!("bot.admin_user_ids must not be empty"));
-    }
-
     let mut tournaments = Vec::with_capacity(raw.tournaments.len());
     for (idx, t) in raw.tournaments.iter().enumerate() {
         let is_last = idx == raw.tournaments.len() - 1;
@@ -182,7 +177,6 @@ mod tests {
             r#"
 [bot]
 discord_token = "tok"
-admin_user_ids = [1, 2]
 
 [gcp]
 bucket = "b"
@@ -202,7 +196,6 @@ channel_pattern = ".*"
 "#,
         );
         let cfg = validate(raw).unwrap();
-        assert_eq!(cfg.bot.admin_user_ids, vec![1, 2]);
         assert_eq!(cfg.tournaments.len(), 2);
         assert_eq!(cfg.tournaments[0].sheet_tab, "SF 2026");
         assert_eq!(cfg.tournaments[0].gcs_prefix, "sf-2026/");
@@ -211,28 +204,11 @@ channel_pattern = ".*"
     }
 
     #[test]
-    fn rejects_empty_admin_user_ids() {
-        let raw = raw_from_toml(
-            r#"
-[bot]
-discord_token = "tok"
-admin_user_ids = []
-[gcp]
-bucket = "b"
-sheet_id = "s"
-"#,
-        );
-        let err = validate(raw).unwrap_err().to_string();
-        assert!(err.contains("admin_user_ids"), "{err}");
-    }
-
-    #[test]
     fn rejects_invalid_regex() {
         let raw = raw_from_toml(
             r#"
 [bot]
 discord_token = "t"
-admin_user_ids = [1]
 [gcp]
 bucket = "b"
 sheet_id = "s"
@@ -251,7 +227,6 @@ channel_pattern = "["
             r#"
 [bot]
 discord_token = "t"
-admin_user_ids = [1]
 [gcp]
 bucket = "b"
 sheet_id = "s"
@@ -275,7 +250,6 @@ channel_pattern = ".*"
             r#"
 [bot]
 discord_token = "t"
-admin_user_ids = [1]
 [gcp]
 bucket = "b"
 sheet_id = "s"
@@ -299,7 +273,6 @@ channel_pattern = ".*"
             r#"
 [bot]
 discord_token = "t"
-admin_user_ids = [1]
 [gcp]
 bucket = "b"
 sheet_id = "s"
@@ -324,7 +297,6 @@ channel_pattern = ".*"
             r#"
 [bot]
 discord_token = "t"
-admin_user_ids = [1]
 [gcp]
 bucket = "b"
 sheet_id = "s"

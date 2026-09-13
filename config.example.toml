@@ -8,9 +8,6 @@
 
 [bot]
 discord_token = "REPLACE_ME"
-# At least one Discord user ID. All listed users receive a DM when a results
-# row fails to land in the sheet.
-admin_user_ids = [123456789012345678]
 
 [gcp]
 # Bucket that replay attachments are uploaded into.

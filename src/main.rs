@@ -1,25 +1,21 @@
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
-use serenity::{all::GatewayIntents, http::Http, Client};
-use tracing::{info, warn, Level};
-use tracing_subscriber::{fmt, prelude::*, registry, reload, EnvFilter};
+use serenity::{all::GatewayIntents, Client};
+use tracing::{info, warn};
+use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 
 mod config;
 mod diag;
 mod entry;
 mod gcs;
 mod handler;
-mod notify;
 mod parse;
 mod retry;
 mod sheets;
 mod tournament;
 
-use crate::{
-    config::Config, gcs::GcsClient, handler::Handler, notify::DiscordErrorLayer,
-    sheets::SheetsClient,
-};
+use crate::{config::Config, gcs::GcsClient, handler::Handler, sheets::SheetsClient};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -30,13 +26,10 @@ async fn main() -> Result<()> {
         .install_default()
         .expect("install rustls ring CryptoProvider");
 
-    // Basic tracing first; the Discord error layer starts inert (`None`) and is
-    // swapped in via the reload handle once config (and the token) is loaded.
-    let (discord_layer, discord_handle) = reload::Layer::new(None::<DiscordErrorLayer>);
+    // Structured JSON logs to stdout; infra tails and alerts on these.
     registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-        .with(fmt::layer())
-        .with(discord_layer)
+        .with(fmt::layer().json().flatten_event(true))
         .init();
 
     let config_path = std::env::var_os("CONFIG_PATH")
@@ -52,21 +45,7 @@ async fn main() -> Result<()> {
     );
     let config = Arc::new(Config::load(&config_path, &tournaments_path)?);
 
-    // Now that the token is known, activate Discord forwarding of ERROR logs.
-    let error_http = Arc::new(Http::new(&config.bot.discord_token));
-    discord_handle
-        .reload(Some(DiscordErrorLayer::new(
-            error_http,
-            config.bot.admin_user_ids.clone(),
-            Level::ERROR,
-        )))
-        .expect("install Discord error log layer");
-
     info!("Replays will be saved to bucket \"{}\"", config.gcp.bucket);
-    info!(
-        "Errors will be sent to user IDs {:?}",
-        config.bot.admin_user_ids
-    );
 
     let sheets = Arc::new(
         SheetsClient::new(config.gcp.sheet_id.clone())

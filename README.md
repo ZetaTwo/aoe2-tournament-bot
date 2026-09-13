@@ -17,8 +17,9 @@ tournament patterns. For each new or edited message it tries to extract:
 
 It looks up the players' Discord display names, downloads any attached
 replay files into the configured GCS bucket, and appends a row to the
-tournament's tab in the configured Google Sheet. If the row write fails,
-every user listed in `admin_user_ids` is DM'd.
+tournament's tab in the configured Google Sheet. Failures are logged as
+structured JSON to stdout; alerting on them is handled by infra, not the
+bot itself.
 
 ## Configuration
 
@@ -28,14 +29,16 @@ Configuration is split across two TOML files that are merged at startup:
   Checked into git and baked into the container image, so changes need a
   push-to-`main` (which CI builds + deploys). Default path
   `./tournaments.toml`, overridable via `TOURNAMENTS_PATH`.
-- `config.toml` — Discord token, admin IDs, GCP bucket/sheet ID. Never
-  committed; `ansible-vault`-encrypted in the sibling `infrastructure`
-  repo's `ansible/roles/aoe2_tournament_bot/files/config.toml` and applied
-  as a Kubernetes Secret in production. Default path `./config.toml`,
+- `config.toml` — Discord token, GCP bucket/sheet ID. Never committed;
+  `ansible-vault`-encrypted in the sibling `infrastructure` repo's
+  `ansible/roles/aoe2_tournament_bot/files/config.toml` and applied as a
+  Kubernetes Secret in production. Default path `./config.toml`,
   overridable via `CONFIG_PATH`. See [config.example.toml](config.example.toml)
   for the schema.
 
-Log level is controlled by `RUST_LOG` (e.g. `info`, `debug,serenity=warn`).
+Logs are structured JSON on stdout; level is controlled by `RUST_LOG`
+(e.g. `info`, `debug,serenity=warn`). Infra tails and alerts on these logs
+— the bot no longer DMs admins on failure.
 
 A tournament block looks like:
 
