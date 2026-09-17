@@ -27,6 +27,21 @@ pub fn backoff() -> ExponentialBuilder {
         .with_jitter()
 }
 
+/// Extended backoff for the background worker (see [`crate::worker`]), used
+/// to retry a single step (one attachment upload, or the sheet append) well
+/// beyond a transient blip — covering a sustained Sheets/GCS outage or
+/// rate-limit window without blocking the Discord gateway task, which has
+/// already returned by the time this runs. ~15 attempts, capped at 60s
+/// between tries, landing in the 10-30 minute band depending on jitter.
+pub fn job_backoff() -> ExponentialBuilder {
+    ExponentialBuilder::default()
+        .with_min_delay(Duration::from_secs(5))
+        .with_factor(2.0)
+        .with_max_delay(Duration::from_secs(60))
+        .with_max_times(15)
+        .with_jitter()
+}
+
 /// Retry predicate for the GCS client.
 pub fn gcs_retryable(e: &gcloud_storage::http::Error) -> bool {
     use gcloud_storage::http::Error;

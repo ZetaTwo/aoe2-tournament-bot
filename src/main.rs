@@ -14,6 +14,7 @@ mod parse;
 mod retry;
 mod sheets;
 mod tournament;
+mod worker;
 
 use crate::{config::Config, gcs::GcsClient, handler::Handler, sheets::SheetsClient};
 
@@ -72,12 +73,14 @@ async fn main() -> Result<()> {
             .context("constructing GCS client")?,
     );
 
+    let (job_tx, job_rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(worker::run(job_rx, sheets, gcs));
+
     let token = config.bot.discord_token.clone();
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
     let handler = Handler {
         config: config.clone(),
-        sheets,
-        gcs,
+        job_tx,
     };
     let mut client = Client::builder(token, intents)
         .event_handler(handler)

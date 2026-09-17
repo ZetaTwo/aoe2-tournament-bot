@@ -1,40 +1,26 @@
 use std::sync::Arc;
 
-use anyhow::{Context as _, Result};
-use chrono::{SecondsFormat, Utc};
+use anyhow::{anyhow, Context as _, Result};
 use serenity::{
     all::{
         Channel, ChannelType, Context, EventHandler, GuildChannel, Message, MessageUpdateEvent,
-        Ready, UserId,
+        Ready,
     },
     async_trait,
 };
-use tracing::{debug, error, info, warn};
+use tokio::sync::mpsc;
+use tracing::{debug, info, warn};
 
 use crate::{
-    config::{Config, Tournament},
+    config::Config,
     diag::{log_processing_failure, log_serenity_failure},
-    entry::ResultsEntry,
-    gcs::GcsClient,
-    parse::parse_message_content,
-    sheets::SheetsClient,
     tournament::{match_tournament, MatchInput},
+    worker::{Job, MessageEvent},
 };
 
 pub struct Handler {
     pub config: Arc<Config>,
-    pub sheets: Arc<SheetsClient>,
-    pub gcs: Arc<GcsClient>,
-}
-
-/// Which gateway event delivered the message. On [`MessageEvent::Updated`],
-/// Discord guarantees the attachments are unchanged from the original post,
-/// so the files are already in GCS and must not be re-uploaded — an overwrite
-/// needs `storage.objects.delete`, which the runtime service account lacks.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum MessageEvent {
-    Created,
-    Updated,
+    pub job_tx: mpsc::UnboundedSender<Job>,
 }
 
 #[async_trait]
@@ -124,100 +110,32 @@ impl Handler {
             "matched results message to tournament",
         );
 
-        let entry = self
-            .construct_results_entry(
-                ctx,
-                &message,
-                &channel,
-                category.as_deref(),
-                tournament,
-                event,
-            )
-            .await?;
-
-        let now = Utc::now();
-        let mut row = Vec::with_capacity(crate::entry::SHEET_COLUMN_COUNT);
-        row.push(now.to_rfc3339_opts(SecondsFormat::Secs, false));
-        row.extend(entry.get_row());
-
-        if let Err(e) = self.sheets.append_row(&tournament.sheet_tab, row).await {
-            error!("appending row failed for message {}: {e:#}", message.id);
-        }
-
-        Ok(())
-    }
-
-    async fn construct_results_entry(
-        &self,
-        ctx: &Context,
-        message: &Message,
-        channel: &GuildChannel,
-        category: Option<&str>,
-        tournament: &Tournament,
-        event: MessageEvent,
-    ) -> Result<ResultsEntry> {
-        let jump_url = message.link();
         let poster = message
             .author
             .global_name
             .clone()
             .unwrap_or_else(|| message.author.name.clone());
+        let job = Job {
+            http: ctx.http.clone(),
+            message_id: message.id,
+            jump_url: message.link(),
+            poster,
+            content: message.content.clone(),
+            category,
+            gcs_prefix: tournament.gcs_prefix.clone(),
+            sheet_tab: tournament.sheet_tab.clone(),
+            attachments: message.attachments.clone(),
+            event,
+        };
+        // Unbounded, so this never blocks the gateway task; the send only
+        // fails if the worker task itself has exited (e.g. panicked), which
+        // is a process-level problem this error surfaces via the normal
+        // log_processing_failure path.
+        self.job_tx
+            .send(job)
+            .map_err(|_| anyhow!("background worker queue is closed"))?;
 
-        let mut entry = ResultsEntry::new(jump_url, poster, message.content.clone());
-        entry.bracket = category.map(|s| s.to_string());
-
-        parse_message_content(&mut entry, &message.content);
-
-        if let Some(id) = entry.player1_id {
-            entry.player1_name = Some(fetch_display_name(ctx, UserId::new(id)).await);
-        }
-        if let Some(id) = entry.player2_id {
-            entry.player2_name = Some(fetch_display_name(ctx, UserId::new(id)).await);
-        }
-
-        let mut download_links = Vec::with_capacity(message.attachments.len());
-        for (idx, attachment) in message.attachments.iter().enumerate() {
-            let object_name = format!(
-                "{}{}_{}",
-                tournament.gcs_prefix, attachment.id, attachment.filename
-            );
-            // Discord does not allow adding or changing attachments on an
-            // existing message, so on an edit the files were already uploaded
-            // by the original `message` event. Re-uploading would overwrite the
-            // existing object, which GCS treats as a delete+create and rejects
-            // for a create-only service account. Reuse the deterministic name
-            // so the row still carries a complete replays_link.
-            if event == MessageEvent::Updated {
-                debug!(
-                    "Skipping upload of attachment {} on message edit; reusing {}",
-                    idx + 1,
-                    object_name
-                );
-            } else {
-                let bytes = attachment.download().await.with_context(|| {
-                    format!(
-                        "downloading attachment {} ({})",
-                        attachment.id, attachment.filename
-                    )
-                })?;
-                info!(
-                    "Uploading attachment {} as {} with {} bytes of data",
-                    idx + 1,
-                    object_name,
-                    bytes.len()
-                );
-                self.gcs.upload(&object_name, bytes).await?;
-            }
-            download_links.push(format!("gcs://{}/{}", self.gcs.bucket(), object_name));
-        }
-
-        if !download_links.is_empty() {
-            entry.replays_link = Some(download_links.join("\n"));
-        } else {
-            entry.replays_link = Some(String::new());
-        }
-        let _ = channel;
-        Ok(entry)
+        Ok(())
     }
 }
 
@@ -248,14 +166,4 @@ async fn resolve_channel(
     };
 
     Ok(Some((guild_channel, category)))
-}
-
-async fn fetch_display_name(ctx: &Context, user_id: UserId) -> String {
-    match user_id.to_user(&ctx.http).await {
-        Ok(user) => user.global_name.unwrap_or(user.name),
-        Err(e) => {
-            warn!("failed to fetch user {user_id}: {e}");
-            user_id.to_string()
-        }
-    }
 }
