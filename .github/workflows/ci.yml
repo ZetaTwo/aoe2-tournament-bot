@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  release:
+    types: [published]
   workflow_dispatch:
 
 concurrency:
@@ -34,7 +36,12 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --tests -- -D warnings
 
-  deploy:
+  # Builds+pushes a :sha image on every push to main so there's always a
+  # tested, promotable artifact once a release is cut — this job no longer
+  # deploys anything itself. Production deploys are release-gated (see
+  # deploy-production below): the bot only allows one gateway connection
+  # per bot token, so there's no staging tier to deploy to on every push.
+  build-and-push:
     needs: test
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -42,7 +49,7 @@ jobs:
       contents: read
       packages: write
     concurrency:
-      group: deploy
+      group: build-and-push
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v6
@@ -64,14 +71,56 @@ jobs:
           # attestations, which turns the push into an OCI image index.
           # Keep a single-manifest image so `:<sha>` pinning stays simple.
           provenance: false
-          # Immutable per-commit tag only — GitOps wants a stable reference
-          # for the infrastructure-repo commit below, so no floating :latest.
+          # Immutable per-commit tag only — deploy-production promotes this
+          # exact tag by digest, so no floating :latest.
           tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           # The `buildcache` tag keeps the cargo-chef dependency layer across
           # CI runs; GHCR has no automatic cleanup policy excluding it, so
           # prune old buildcache manually if storage ever becomes a concern.
           cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+  # Promotes the exact image already built+pushed by build-and-push for the
+  # release's commit — retags it, never rebuilds, so what ships to
+  # production is bit-identical to what was tagged for release.
+  deploy-production:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - name: Check out the released commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Resolve release commit SHA
+        id: release_sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify the released commit has a built image
+        run: |
+          docker buildx imagetools inspect \
+            "${{ env.IMAGE_NAME }}:${{ steps.release_sha.outputs.sha }}" \
+            || { echo "::error::No image tagged :${{ steps.release_sha.outputs.sha }} in GHCR — this release's commit was never built+pushed by build-and-push. Tag the release from a commit that's actually on main." >&2; exit 1; }
+
+      - name: Promote the tested image to the release tag (retag, no rebuild)
+        run: |
+          docker buildx imagetools create \
+            --tag "${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }}" \
+            "${{ env.IMAGE_NAME }}:${{ steps.release_sha.outputs.sha }}"
 
       - name: Check out infrastructure
         uses: actions/checkout@v6
@@ -83,10 +132,10 @@ jobs:
       - name: Bump image tag in infrastructure and push
         working-directory: infra-repo
         run: |
-          sed -i "s|image: ${{ env.IMAGE_NAME }}:.*|image: ${{ env.IMAGE_NAME }}:${{ github.sha }}|" \
+          sed -i "s|image: ${{ env.IMAGE_NAME }}:.*|image: ${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }}|" \
             k8s/aoe2-tournament-bot/deployment.yaml
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add k8s/aoe2-tournament-bot/deployment.yaml
-          git commit -m "chore: bump aoe2-tournament-bot to ${{ github.sha }}"
+          git commit -m "chore: promote aoe2-tournament-bot to ${{ github.event.release.tag_name }} (production)"
           git push || (git pull --rebase && git push)
