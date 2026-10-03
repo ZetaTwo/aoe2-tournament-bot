@@ -90,15 +90,16 @@ default and is recorded in this column regardless).
 - **Scaling**: `replicas: 1`, no HPA. Discord gateway is a single
   persistent WebSocket; autoscaling would fight that.
 - **Image source**: GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml))
-  builds + pushes to `ghcr.io/zetatwo/aoe2-tournament-bot` on push to
-  `main`, then checks out `infrastructure`, bumps the image tag in
-  `k8s/aoe2-tournament-bot/deployment.yaml`, commits, and pushes. Flux CD
-  (running in the cluster) picks up that commit and reconciles — no
+  builds + pushes `ghcr.io/zetatwo/aoe2-tournament-bot:<sha>` on push to
+  `main`. Publishing a release retags it as `:<release tag>` and triggers
+  `infrastructure`'s `deploy` workflow, which pins
+  `k8s/aoe2-tournament-bot/deployment.yaml` to the newest release tag and
+  commits. Flux CD (running in the cluster) reconciles that commit — no
   `kubectl`/deploy step run by CI itself.
 - **Auth (GitHub → registry / infra repo)**: GHCR push uses the default
-  `GITHUB_TOKEN`; the commit-back uses a fine-grained PAT
-  (`INFRA_REPO_PAT` repo secret, scoped to `Contents: Read and write` on
-  `infrastructure` only).
+  `GITHUB_TOKEN`. The deploy trigger uses a GitHub App
+  (`DEPLOY_APP_CLIENT_ID` / `DEPLOY_APP_PRIVATE_KEY` secrets) installed on
+  `infrastructure` with Actions: write only — it can't push there.
 - **Infra-as-code**: this repo's [terraform/](terraform/) now only
   references the runtime SA and the replay bucket (`data` blocks, nothing
   managed). The actual Kubernetes manifests and secret-provisioning

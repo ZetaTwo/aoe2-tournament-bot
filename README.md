@@ -95,15 +95,15 @@ CD watches that repo's `k8s/` tree and reconciles it). No Service or
 Ingress — it's not a web app, just a background worker holding a
 persistent Discord gateway connection (`replicas: 1`, never autoscaled).
 
-- **Code path**: push to `main` → `cargo test` job runs → on success, the
-  `deploy` job builds the image, pushes it to
-  `ghcr.io/zetatwo/aoe2-tournament-bot` tagged `:<sha>`, then bumps that
-  tag in `infrastructure`'s `k8s/aoe2-tournament-bot/deployment.yaml` and
-  pushes — Flux reconciles the new image within about a minute.
+- **Code path**: push to `main` → `cargo test` → `build-and-push` pushes
+  `ghcr.io/zetatwo/aoe2-tournament-bot:<sha>`. Publishing a release retags
+  that image as `:<release tag>` and triggers `infrastructure`'s `deploy`
+  workflow, which pins `k8s/aoe2-tournament-bot/deployment.yaml` to the
+  newest release tag — Flux reconciles it within about a minute.
 - **Auth from GitHub to registry / infra repo**: GHCR push uses the
-  default `GITHUB_TOKEN`; the commit-back to `infrastructure` uses a
-  fine-grained PAT (`INFRA_REPO_PAT` repo secret, scoped to
-  `Contents: Read and write` on that one repo).
+  default `GITHUB_TOKEN`. The trigger uses a GitHub App
+  (`DEPLOY_APP_CLIENT_ID` / `DEPLOY_APP_PRIVATE_KEY` secrets) that may only
+  start workflows in `infrastructure` (Actions: write), not push to it.
 - **Config / secrets**: `config.toml` is `ansible-vault`-encrypted at
   `infrastructure`'s `ansible/roles/aoe2_tournament_bot/files/config.toml`
   and applied as a Kubernetes `Secret`, mounted at
