@@ -96,8 +96,8 @@ Ingress — it's not a web app, just a background worker holding a
 persistent Discord gateway connection (`replicas: 1`, never autoscaled).
 
 - **Code path**: push to `main` → `cargo test` → `build-and-push` pushes
-  `ghcr.io/zetatwo/aoe2-tournament-bot:<sha>`. Publishing a release retags
-  that image as `:<release tag>` and triggers `infrastructure`'s `deploy`
+  `ghcr.io/zetatwo/aoe2-tournament-bot:<sha>`. Pushing a `vX.Y.Z` tag retags
+  that image as `:vX.Y.Z` and triggers `infrastructure`'s `deploy`
   workflow, which pins `k8s/aoe2-tournament-bot/deployment.yaml` to the
   newest release tag — Flux reconciles it within about a minute.
 - **Auth from GitHub to registry / infra repo**: GHCR push uses the

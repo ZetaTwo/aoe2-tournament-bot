@@ -91,7 +91,7 @@ default and is recorded in this column regardless).
   persistent WebSocket; autoscaling would fight that.
 - **Image source**: GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml))
   builds + pushes `ghcr.io/zetatwo/aoe2-tournament-bot:<sha>` on push to
-  `main`. Publishing a release retags it as `:<release tag>` and triggers
+  `main`. Pushing a `vX.Y.Z` tag retags it as `:vX.Y.Z` and triggers
   `infrastructure`'s `deploy` workflow, which pins
   `k8s/aoe2-tournament-bot/deployment.yaml` to the newest release tag and
   commits. Flux CD (running in the cluster) reconciles that commit — no
