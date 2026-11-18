@@ -1,7 +1,7 @@
 # cargo-chef caches a dependency-only build as its own layer, so editing
 # src/ no longer invalidates the (slow) dependency compile — only a
 # Cargo.toml/Cargo.lock change does.
-FROM docker.io/library/rust:1.95-slim-bookworm AS chef
+FROM docker.io/library/rust:1-slim-trixie AS chef
 RUN cargo install cargo-chef --locked
 WORKDIR /build
 
@@ -25,7 +25,7 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src ./src
 RUN cargo build --release --locked && strip target/release/aoe2-tournament-bot
 
-FROM docker.io/library/debian:bookworm-slim
+FROM docker.io/library/debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
